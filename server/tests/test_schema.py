@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from prism_server.schema import MAX_BATCH_SPANS, Span, SpanBatch
+from lucentpad_server.schema import MAX_BATCH_SPANS, Span, SpanBatch
 
 T0 = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 

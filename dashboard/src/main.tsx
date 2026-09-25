@@ -15,12 +15,17 @@ applyThemePreference(readThemePreference());
 const root = document.getElementById("root");
 if (!root) throw new Error("#root element missing from index.html");
 
-createRoot(root).render(
-  <StrictMode>
-    <AppProviders>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AppProviders>
-  </StrictMode>,
-);
+if (import.meta.env.MODE === "site") {
+  // Landing site + static demo (GitHub Pages). Compiled out of the normal dashboard build.
+  void import("./site/entry").then(({ startSite }) => startSite(root));
+} else {
+  createRoot(root).render(
+    <StrictMode>
+      <AppProviders>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AppProviders>
+    </StrictMode>,
+  );
+}

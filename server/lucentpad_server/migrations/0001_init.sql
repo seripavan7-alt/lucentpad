@@ -7,7 +7,7 @@
 -- Neither table has foreign keys or triggers: that keeps bulk COPY-into-staging inserts
 -- cheap and lets child spans arrive before their root (the SDK exports the root last).
 
-CREATE FUNCTION prism_status_rank(s text) RETURNS integer
+CREATE FUNCTION lucentpad_status_rank(s text) RETURNS integer
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
     AS $$ SELECT CASE s WHEN 'blocked' THEN 2 WHEN 'error' THEN 1 ELSE 0 END $$;
 

@@ -1,0 +1,21 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.mark {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.word {
+  color: var(--color-text);
+}
+
+.accent {
+  color: var(--color-accent);
+}

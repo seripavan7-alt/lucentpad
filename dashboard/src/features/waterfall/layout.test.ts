@@ -40,7 +40,7 @@ describe("buildWaterfall", () => {
   it("positions event markers on the trace timeline", () => {
     const { rows } = buildWaterfall(supportSpans);
     const [budget] = rows[0]!.events;
-    expect(budget!.event.name).toBe("prism.budget.alert");
+    expect(budget!.event.name).toBe("lucentpad.budget.alert");
     expect(budget!.offsetMs).toBe(3900);
     expect(budget!.offsetPct).toBeCloseTo((3900 / 4200) * 100);
   });

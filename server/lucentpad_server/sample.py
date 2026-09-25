@@ -2,7 +2,7 @@
 
 ``generate(now)`` returns the same spans for the same ``now`` and ``seed``. CLI::
 
-    python -m prism_server.sample --out spans.json [--now 2026-09-25T12:00:00Z] [--seed 42]
+    python -m lucentpad_server.sample --out spans.json [--now 2026-09-25T12:00:00Z] [--seed 42]
 
 Model names and costs come from ``pricing.py``, whose prices are illustrative placeholders.
 """
@@ -17,8 +17,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from prism_server.pricing import cost_usd
-from prism_server.schema import (
+from lucentpad_server.pricing import cost_usd
+from lucentpad_server.schema import (
     Attr,
     Attributes,
     EventName,
@@ -30,18 +30,18 @@ from prism_server.schema import (
 )
 
 # Event attribute keys used by the sample data (not part of the frozen API contract).
-FAILOVER_FROM_MODEL = "prism.failover.from_model"
-FAILOVER_TO_MODEL = "prism.failover.to_model"
-FAILOVER_STATUS_CODE = "prism.failover.status_code"
-FAILOVER_RETRIES = "prism.failover.retries"
-BUDGET_LIMIT_USD = "prism.budget.limit_usd"
-BUDGET_SPENT_USD = "prism.budget.spent_usd"
-REDACTION_KIND = "prism.redaction.kind"
-REDACTION_COUNT = "prism.redaction.count"
-INPUT_PREVIEW = "prism.input.preview"
+FAILOVER_FROM_MODEL = "lucentpad.failover.from_model"
+FAILOVER_TO_MODEL = "lucentpad.failover.to_model"
+FAILOVER_STATUS_CODE = "lucentpad.failover.status_code"
+FAILOVER_RETRIES = "lucentpad.failover.retries"
+BUDGET_LIMIT_USD = "lucentpad.budget.limit_usd"
+BUDGET_SPENT_USD = "lucentpad.budget.spent_usd"
+REDACTION_KIND = "lucentpad.redaction.kind"
+REDACTION_COUNT = "lucentpad.redaction.count"
+INPUT_PREVIEW = "lucentpad.input.preview"
 
 SUPPORT_SERVICE = "support-agent"
-GATEWAY_SERVICE = "prism-gateway"
+GATEWAY_SERVICE = "lucentpad-gateway"
 SUPPORT_MODEL = "claude-sonnet-5"
 SUPPORT_FALLBACK = "claude-haiku-4-5"
 REFUND_LIMIT_USD = 200
@@ -53,7 +53,7 @@ _SUPPORT_VARIANTS: list[tuple[str, int]] = [
     ("status", 45),  # llm, lookup_order, llm
     ("guardrail", 8),  # refund over the limit: blocked by a guardrail span
     ("failover", 6),  # primary 429 -> fallback model
-    ("budget", 6),  # crosses the per-run budget: prism.budget.alert
+    ("budget", 6),  # crosses the per-run budget: lucentpad.budget.alert
     ("not_found", 7),  # lookup_order errors, agent apologises
     ("llm_error", 4),  # model call fails after retries; run errors
 ]
@@ -341,7 +341,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                 start=g_start,
                 end=g_end,
                 parent=root_id,
-                attributes={**common, Attr.GUARDRAIL_RULE: rule, "prism.refund.amount": amount},
+                attributes={**common, Attr.GUARDRAIL_RULE: rule, "lucentpad.refund.amount": amount},
                 status="blocked",
                 status_message=f"refund of ${amount} exceeds the ${REFUND_LIMIT_USD} limit",
                 events=[
@@ -358,7 +358,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
         else:
             llm((60, 120), "tool_use")
             amount = rng.choice([19, 24, 35, 49, 59, 89, 120, 149, 180])
-            tool("issue_refund", (40, 160), 60, extra={"prism.refund.amount": amount})
+            tool("issue_refund", (40, 160), 60, extra={"lucentpad.refund.amount": amount})
             tool("draft_email", (8, 30), rng.randint(150, 260))
             if variant == "budget":
                 prices = cost_usd(SUPPORT_MODEL, context, 250) or 0.0
@@ -518,7 +518,9 @@ def to_json(spans: list[Span]) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Dump deterministic Prism sample spans as JSON.")
+    parser = argparse.ArgumentParser(
+        description="Dump deterministic LucentPad sample spans (JSON)."
+    )
     parser.add_argument("--out", type=Path, required=True, help="output file")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(

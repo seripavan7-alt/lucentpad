@@ -1,6 +1,8 @@
 import type { ComponentType, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router";
 import { useHealth } from "../api/queries";
+import { useDemoMode } from "../demo/context";
+import { Logo } from "./Logo";
 import { CostsIcon, EvalsIcon, GatewayIcon, GuardrailsIcon, TracesIcon } from "./icons";
 import styles from "./Layout.module.css";
 import { ThemeToggle } from "./ThemeToggle";
@@ -32,21 +34,24 @@ function ApiStatus() {
   );
 }
 
+function DemoBanner({ siteHref }: { siteHref: string }) {
+  return (
+    <div className={styles.demoBanner} role="note">
+      <span>
+        <strong>Demo</strong> · sample data, read-only
+      </span>
+      <a href={siteHref}>Back to LucentPad</a>
+    </div>
+  );
+}
+
 export function Layout() {
+  const demo = useDemoMode();
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
-            <path
-              d="M16 4 28.5 26.5h-25z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <span>Prism</span>
+          <Logo />
         </div>
         <nav aria-label="Main" className={styles.nav}>
           {NAV.map(({ to, label, Icon, milestone }) => (
@@ -58,11 +63,19 @@ export function Layout() {
           ))}
         </nav>
         <div className={styles.footer}>
-          <ApiStatus />
+          {demo ? (
+            <span className={styles.apiStatus} data-state="demo">
+              <span className={styles.apiDot} aria-hidden="true" />
+              Demo data
+            </span>
+          ) : (
+            <ApiStatus />
+          )}
           <ThemeToggle />
         </div>
       </aside>
       <main className={styles.main}>
+        {demo && <DemoBanner siteHref={demo.siteHref} />}
         <Outlet />
       </main>
     </div>

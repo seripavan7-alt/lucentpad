@@ -12,6 +12,15 @@ export class ApiError extends Error {
 
 type QueryValue = string | number | null | undefined;
 
+type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+
+let fetcher: Fetcher = (url, init) => fetch(url, init);
+
+/** Swap how requests are sent: the static demo answers them in the browser (src/demo/adapter.ts). */
+export function setFetcher(next: Fetcher): void {
+  fetcher = next;
+}
+
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -36,10 +45,10 @@ async function errorDetail(res: Response): Promise<string> {
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, { headers: { Accept: "application/json" }, signal });
+    res = await fetcher(url, { headers: { Accept: "application/json" }, signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;
-    throw new ApiError(0, "Can't reach the Prism API.");
+    throw new ApiError(0, "Can't reach the LucentPad API.");
   }
   if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
   return (await res.json()) as T;

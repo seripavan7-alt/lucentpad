@@ -12,8 +12,8 @@ from typing import Annotated
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 
-from prism_server import db, sample
-from prism_server.schema import (
+from lucentpad_server import db, sample
+from lucentpad_server.schema import (
     ErrorResponse,
     IngestAccepted,
     SpanBatch,
@@ -22,7 +22,7 @@ from prism_server.schema import (
     TraceDetail,
     TraceList,
 )
-from prism_server.store import Cursor, InvalidCursorError, SpanStore
+from lucentpad_server.store import Cursor, InvalidCursorError, SpanStore
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
     """Build the app. Nothing connects here; the DB pool is opened in the lifespan.
 
     ``database_url`` defaults to ``$DATABASE_URL`` and ``seed_sample`` to
-    ``$PRISM_SEED_SAMPLE=1``, both read at startup.
+    ``$LUCENTPAD_SEED_SAMPLE=1``, both read at startup.
     """
 
     @asynccontextmanager
@@ -49,7 +49,7 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
         try:
             await db.migrate(pool)
             store = SpanStore(pool)
-            seed = _env_flag("PRISM_SEED_SAMPLE") if seed_sample is None else seed_sample
+            seed = _env_flag("LUCENTPAD_SEED_SAMPLE") if seed_sample is None else seed_sample
             if seed and await store.is_empty():
                 count = await store.insert_spans(sample.generate(datetime.now(UTC)))
                 log.info("loaded %d sample spans", count)
@@ -58,7 +58,7 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
         finally:
             await pool.close()
 
-    app = FastAPI(title="Prism API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="LucentPad API", version="0.1.0", lifespan=lifespan)
 
     def get_store(request: Request) -> SpanStore:
         store: SpanStore = request.app.state.store

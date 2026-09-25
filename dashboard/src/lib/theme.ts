@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ThemePreference = "light" | "dark" | "system";
 
-export const THEME_STORAGE_KEY = "prism.theme";
+export const THEME_STORAGE_KEY = "lucentpad.theme";
 const PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
 
 function isPreference(value: unknown): value is ThemePreference {

@@ -9,10 +9,10 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from prism_server import db, sample
-from prism_server.app import create_app
-from prism_server.schema import Span, TraceDetail, TraceList, TraceSummary
-from prism_server.store import SpanStore
+from lucentpad_server import db, sample
+from lucentpad_server.app import create_app
+from lucentpad_server.schema import Span, TraceDetail, TraceList, TraceSummary
+from lucentpad_server.store import SpanStore
 
 from .support import NOW, app_client
 
@@ -144,7 +144,7 @@ async def test_trace_detail(client: httpx.AsyncClient) -> None:
 async def test_gateway_trace_summary(client: httpx.AsyncClient) -> None:
     traces = await _all_pages(client, limit=200, source="gateway")
     assert {t.client for t in traces} == {"claude-code", "copilot-chat", "copilot-cli"}
-    assert all(t.service_name == "prism-gateway" and t.llm_calls >= 1 for t in traces)
+    assert all(t.service_name == "lucentpad-gateway" and t.llm_calls >= 1 for t in traces)
     assert all(t.cost_usd > 0 and t.input_tokens > 0 for t in traces)
 
 
@@ -174,7 +174,7 @@ async def test_lifespan_seeds_empty_database_once(db_url: str) -> None:
 
 async def test_lifespan_without_seed(db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", db_url)
-    monkeypatch.delenv("PRISM_SEED_SAMPLE", raising=False)
+    monkeypatch.delenv("LUCENTPAD_SEED_SAMPLE", raising=False)
     async with app_client(create_app()) as c:
         r = await c.get("/v1/traces")
     assert r.json() == {"traces": [], "next_cursor": None}

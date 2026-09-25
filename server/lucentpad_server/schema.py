@@ -17,7 +17,7 @@ MAX_BATCH_SPANS = 1000
 
 
 class Attr:
-    """Attribute keys. ``gen_ai.*`` follow the OTel GenAI conventions; ``prism.*`` are ours."""
+    """Attribute keys. ``gen_ai.*`` follow the OTel GenAI conventions; ``lucentpad.*`` are ours."""
 
     SERVICE_NAME = "service.name"
     GEN_AI_SYSTEM = "gen_ai.system"  # "anthropic" | "openai"
@@ -28,18 +28,18 @@ class Attr:
     GEN_AI_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
     GEN_AI_FINISH_REASONS = "gen_ai.response.finish_reasons"
     GEN_AI_TOOL_NAME = "gen_ai.tool.name"
-    COST_USD = "prism.cost_usd"
-    STREAMING = "prism.streaming"
-    CLIENT = "prism.client"  # "claude-code" | "copilot-chat" | "copilot-cli" | "sdk"
-    SESSION_ID = "prism.session_id"
-    GUARDRAIL_RULE = "prism.guardrail.rule"
+    COST_USD = "lucentpad.cost_usd"
+    STREAMING = "lucentpad.streaming"
+    CLIENT = "lucentpad.client"  # "claude-code" | "copilot-chat" | "copilot-cli" | "sdk"
+    SESSION_ID = "lucentpad.session_id"
+    GUARDRAIL_RULE = "lucentpad.guardrail.rule"
 
 
 class EventName:
-    FAILOVER = "prism.failover"
-    BUDGET_ALERT = "prism.budget.alert"
-    REDACTION = "prism.redaction"
-    GUARDRAIL_BLOCK = "prism.guardrail.block"
+    FAILOVER = "lucentpad.failover"
+    BUDGET_ALERT = "lucentpad.budget.alert"
+    REDACTION = "lucentpad.redaction"
+    GUARDRAIL_BLOCK = "lucentpad.guardrail.block"
 
 
 def _hex_id(length: int) -> AfterValidator:

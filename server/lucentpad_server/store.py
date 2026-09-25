@@ -19,8 +19,8 @@ from typing import Any
 
 import asyncpg
 
-from prism_server.pricing import cost_usd
-from prism_server.schema import (
+from lucentpad_server.pricing import cost_usd
+from lucentpad_server.schema import (
     Attr,
     Attributes,
     Span,
@@ -68,11 +68,11 @@ WITH ins AS (
         (array_agg(source ORDER BY parent_span_id IS NULL DESC, start_time))[1] AS source,
         (array_agg(attributes ->> 'service.name' ORDER BY parent_span_id IS NULL DESC,
                    start_time))[1] AS service_name,
-        (array_agg(attributes ->> 'prism.client' ORDER BY parent_span_id IS NULL DESC,
+        (array_agg(attributes ->> 'lucentpad.client' ORDER BY parent_span_id IS NULL DESC,
                    start_time))[1] AS client,
         min(start_time) AS start_time,
         max(end_time) AS end_time,
-        (array_agg(status ORDER BY prism_status_rank(status) DESC))[1] AS status,
+        (array_agg(status ORDER BY lucentpad_status_rank(status) DESC))[1] AS status,
         count(*) AS span_count,
         count(*) FILTER (WHERE kind = 'llm') AS llm_calls,
         coalesce(sum(input_tokens), 0) AS input_tokens,
@@ -104,7 +104,7 @@ ON CONFLICT (trace_id) DO UPDATE SET
                   ELSE coalesce(t.client, excluded.client) END,
     start_time = least(t.start_time, excluded.start_time),
     end_time = greatest(t.end_time, excluded.end_time),
-    status = CASE WHEN prism_status_rank(excluded.status) > prism_status_rank(t.status)
+    status = CASE WHEN lucentpad_status_rank(excluded.status) > lucentpad_status_rank(t.status)
                   THEN excluded.status ELSE t.status END,
     span_count = t.span_count + excluded.span_count,
     llm_calls = t.llm_calls + excluded.llm_calls,
@@ -160,7 +160,7 @@ def _int_attr(attrs: Attributes, key: str) -> int | None:
 def _extract(span: Span) -> tuple[str | None, int | None, int | None, float | None]:
     """Typed columns from OTel attributes: model, input/output tokens, cost.
 
-    Cost is taken from ``prism.cost_usd`` when the producer set it, otherwise computed
+    Cost is taken from ``lucentpad.cost_usd`` when the producer set it, otherwise computed
     from the (illustrative) price table when model and token counts are known.
     """
     attrs = span.attributes

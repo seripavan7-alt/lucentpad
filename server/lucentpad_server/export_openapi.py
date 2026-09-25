@@ -1,4 +1,4 @@
-"""Write the OpenAPI contract: ``python -m prism_server.export_openapi <path>``."""
+"""Write the OpenAPI contract: ``python -m lucentpad_server.export_openapi <path>``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from prism_server.app import create_app
+from lucentpad_server.app import create_app
 
 
 def main() -> None:

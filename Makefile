@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo
+.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo demo-snapshot site
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -29,15 +29,21 @@ check-web: ## Lint, typecheck, test and build the dashboard
 
 check-contract: ## Fail if contracts/ or generated dashboard types are stale
 	@tmp=$$(mktemp -d); \
-	uv run python -m prism_server.export_openapi $$tmp/openapi.json && \
+	uv run python -m lucentpad_server.export_openapi $$tmp/openapi.json && \
 	diff -u contracts/openapi.json $$tmp/openapi.json && \
 	(cd dashboard && npx --no-install openapi-typescript ../contracts/openapi.json -o $$tmp/schema.d.ts >/dev/null) && \
 	diff -u dashboard/src/api/schema.d.ts $$tmp/schema.d.ts || \
 	{ echo "contract drift: run 'make contract'"; exit 1; }
 
 contract: ## Regenerate contracts/openapi.json and dashboard API types
-	uv run python -m prism_server.export_openapi contracts/openapi.json
+	uv run python -m lucentpad_server.export_openapi contracts/openapi.json
 	cd dashboard && npm run gen:api
+
+demo-snapshot: ## Regenerate the static demo's data (dashboard/src/demo/*.json) from the real API
+	LUCENTPAD_UPDATE_DEMO=1 uv run pytest server/tests/test_demo_snapshot.py -q
+
+site: ## Build the landing site + static demo (GitHub Pages) into dashboard/dist-site
+	cd dashboard && npm run build:site
 
 fmt: ## Auto-format
 	uv run ruff format .

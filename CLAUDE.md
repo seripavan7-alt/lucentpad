@@ -1,4 +1,4 @@
-# Prism: rules for any agent working here
+# LucentPad: rules for any agent working here
 
 Read in this order before doing anything:
 1. `docs/STATUS.md`: where the build is right now (milestone, step, blockers). **Start here.**
@@ -20,11 +20,11 @@ Read in this order before doing anything:
 ## Repo map
 | Path | What | Owner in parallel work |
 | --- | --- | --- |
-| `server/prism_server/` | FastAPI ingest + query API, schema, store, sample data | backend |
-| `server/prism_server/schema.py`, `app.py` route signatures | **API contract** | lead only |
+| `server/lucentpad_server/` | FastAPI ingest + query API, schema, store, sample data | backend |
+| `server/lucentpad_server/schema.py`, `app.py` route signatures | **API contract** | lead only |
 | `contracts/openapi.json` | exported contract; regenerate with `make contract` | lead only |
 | `dashboard/` | React + TS + Vite dashboard; `src/api/schema.d.ts` is generated, never hand-edit | dashboard |
-| `sdk/` (from M1) | `prism-sdk` Python package | sdk |
+| `sdk/` (from M1) | `lucentpad-sdk` Python package | sdk |
 | `examples/` (from M1) | demo support agent | agent |
 | root files, `docker-compose.yml`, `.github/`, `docs/` | shared | lead only |
 
@@ -36,10 +36,10 @@ Read in this order before doing anything:
 
 ## Conventions
 - Python 3.12, uv workspace, `ruff` + `mypy --strict`. Pydantic models are frozen, `extra="forbid"`.
-- Span attributes use OTel GenAI names (`gen_ai.*`) where they fit, otherwise `prism.*`; add new keys as
+- Span attributes use OTel GenAI names (`gen_ai.*`) where they fit, otherwise `lucentpad.*`; add new keys as
   constants on `schema.Attr` / `schema.EventName`, not as string literals.
 - Guardrail blocks are their own span (`kind="guardrail"`); failover and budget alerts are span events.
-- DB tests use `PRISM_TEST_DATABASE_URL`, else testcontainers (the conftest finds OrbStack's socket).
+- DB tests use `LUCENTPAD_TEST_DATABASE_URL`, else testcontainers (the conftest finds OrbStack's socket).
 - Dashboard: plain CSS on the tokens in `dashboard/src/styles/tokens.css`; no UI kit, no Tailwind.
 
 ## Dev machine notes

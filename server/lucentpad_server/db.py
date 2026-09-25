@@ -12,7 +12,7 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 # Arbitrary constant: serialises concurrent migration runners (e.g. two API replicas).
-_MIGRATION_LOCK_ID = 0x5052_4953_4D00  # "PRISM\0"
+_MIGRATION_LOCK_ID = 0x4C55_4345_4E54  # "LUCENT"
 
 
 _JSONB_VERSION = b"\x01"  # jsonb binary wire format: a version byte, then the JSON text
@@ -43,7 +43,7 @@ async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> asy
 
 def migration_files() -> list[tuple[str, str]]:
     """(version, sql) for every ``migrations/NNNN_*.sql`` file, sorted by version."""
-    root = resources.files("prism_server") / "migrations"
+    root = resources.files("lucentpad_server") / "migrations"
     files = sorted(
         (entry.name, entry.read_text(encoding="utf-8"))
         for entry in root.iterdir()

@@ -1,17 +1,17 @@
-# Prism — PRD v1
+# LucentPad — PRD v1
 
-Sep 25, 2026 · @Pavan
+Sep 25, 2026 · @Pavan · *Renamed from Prism to LucentPad on Sep 25, 2026.*
 
 ## Summary
 
-Prism records every LLM call an agent makes and shows it as a live trace with tokens, latency, cost and guardrail events. v1 is a portfolio project: its job is to convince interviewers that its builder can design and ship real systems.
+LucentPad records every LLM call an agent makes and shows it as a live trace with tokens, latency, cost and guardrail events. v1 is a portfolio project: its job is to convince interviewers that its builder can design and ship real systems.
 
 The problem it solves: teams running LLM agents can't see what an agent actually did, what each step cost, or where it failed. Coding assistants like Claude Code and GitHub Copilot are an even blacker box.
 
-Prism connects two ways:
+LucentPad connects two ways:
 
 - **SDK mode (Python):** custom agents wrap their Anthropic or OpenAI client in one line and every call is traced.
-- **Gateway mode:** Claude Code and Copilot point their API base URL at Prism, which forwards traffic to the provider and records it on the way through.
+- **Gateway mode:** Claude Code and Copilot point their API base URL at LucentPad, which forwards traffic to the provider and records it on the way through.
 
 ## Audience and success
 
@@ -20,7 +20,7 @@ The audience is interviewers: hiring managers and senior engineers in system-des
 Two moments must be flawless:
 
 1. **Live waterfall:** a custom agent runs and its trace draws live, step by step, with cost per call.
-2. **Coding assistants traced:** a Claude Code or Copilot session appears in Prism with tokens and cost per turn.
+2. **Coding assistants traced:** a Claude Code or Copilot session appears in LucentPad with tokens and cost per turn.
 
 v1 is done when:
 
@@ -40,8 +40,10 @@ v1 covers both connection modes, a six-page dashboard, simple guardrails and fai
 | Dashboard | Traces list, trace detail (waterfall and span inspector), Costs, Gateway live feed, Guardrails, Evals. Clean and minimal, Linear-style, light and dark themes. |
 | Guardrails | Redacts API keys, emails and card numbers before storage. Blocks prompts that match rules you configure (keywords, patterns). Budgets alert by default; hard stop only for SDK agents, never mid-session in Claude Code. |
 | Failover | On 429 or 5xx for non-streamed requests: retry, then fall back to another model from the same provider. Recorded as an event on the trace. |
-| Eval gate | `prism eval` runs saved prompt cases against a baseline and fails on regression. Sample GitHub Action included. |
-| Hosted demo | Read-only dashboard over realistic seeded data, on GCP. |
+| Eval gate | `lucentpad eval` runs saved prompt cases against a baseline and fails on regression. Sample GitHub Action included. |
+| Landing site | Open-source project site on GitHub Pages: landing page with two central actions, "How to set up and use" (getting-started guide) and "Try the demo". |
+| Static demo | The dashboard running entirely in the browser over a snapshot of the sample data (no backend), on the landing site. Always up, free. |
+| Hosted demo | Read-only dashboard over realistic seeded data, on GCP (covers what the static demo can't: a real API and live ingest). |
 | Docs | README with architecture diagram and trade-offs, usage guides per mode, a video of 3 minutes or less. |
 
 ## Non-goals for v1
@@ -50,11 +52,11 @@ These are deliberately out, to protect the two must-have moments:
 
 - Visitors connecting their own agents to the hosted demo (possible later)
 - Sign-in, user accounts and multi-tenant data isolation
-- Switching providers on failover (for example Claude to OpenAI), which would need Prism to hold API keys
+- Switching providers on failover (for example Claude to OpenAI), which would need LucentPad to hold API keys
 - AI-judged guardrails; v1 uses rules only
 - SDKs for languages other than Python
 - Copilot inline completions, which don't route through custom endpoints
-- Tracking the cost of the sessions that built Prism
+- Tracking the cost of the sessions that built LucentPad
 
 ## Demo agent and script
 
@@ -69,7 +71,7 @@ The 5-minute script:
 5. **2:30 Budget.** The agent crosses its budget and an alert fires.
 6. **3:00 Coding assistants.** Point Claude Code at the gateway with one environment variable and ask a question. The session appears live with tokens and cost per turn. Repeat with Copilot Chat.
 7. **4:00 Failover.** Simulate the primary model failing. The request still succeeds on the fallback model, and the trace shows the switch.
-8. **4:30 Eval gate.** Open a PR that breaks a prompt. `prism eval` fails the CI check.
+8. **4:30 Eval gate.** Open a PR that breaks a prompt. `lucentpad eval` fails the CI check.
 
 On the hosted read-only demo, steps 1, 3 and 5 are browsable as seeded data; the video covers the live steps.
 
@@ -79,7 +81,7 @@ Both modes feed one ingestion pipeline, and the dashboard reads from a single qu
 
 ```mermaid
 flowchart LR
-  A[Support agent<br/>+ Prism SDK] -->|span batches| I[Ingest API]
+  A[Support agent<br/>+ LucentPad SDK] -->|span batches| I[Ingest API]
   C[Claude Code /<br/>Copilot] --> G[Gateway]
   G --> P[Anthropic /<br/>OpenAI]
   G -->|spans, off the<br/>response path| I
@@ -125,7 +127,7 @@ Five milestones over about four weeks at 20+ hours a week. Each ends at a checkp
 | M0 Foundations | Days 1–3 | Repo, docker compose, span schema and API contract, sample data, design tokens, dashboard shell on sample data, CI | `make dev` shows the dashboard on sample data; `make check` passes in CI |
 | M1 SDK and live waterfall | Week 1 | SDK for Anthropic and OpenAI, ingest pipeline with queue, Traces list, trace detail, the support agent | A support-agent run appears as a live waterfall within 2 seconds, with cost per call (must-have 1) |
 | M2 Gateway | Week 2 | Anthropic and OpenAI routes with streaming, Gateway page, simple failover | Claude Code, Copilot Chat and Copilot CLI sessions appear with tokens and cost per turn; streaming tests pass (must-have 2) |
-| M3 Guardrails, costs, evals | Week 3 | Redaction, rule-based blocking, budget alerts, Costs, Guardrails and Evals pages, `prism eval` and GitHub Action | Demo script steps 3, 4, 5 and 8 work end to end |
+| M3 Guardrails, costs, evals | Week 3 | Redaction, rule-based blocking, budget alerts, Costs, Guardrails and Evals pages, `lucentpad eval` and GitHub Action | Demo script steps 3, 4, 5 and 8 work end to end |
 | M4 Ship | Week 4 | Seed data, read-only hosted demo on GCP, README, usage docs, video, load test | Hosted demo is live; README, docs and video are published; ingestion hits the target |
 
 At each checkpoint the builder reports: what works, how to run and see it, what's stubbed, and any decisions needed. Nothing moves to the next milestone without approval.
@@ -138,8 +140,10 @@ At each checkpoint the builder reports: what works, how to run and see it, what'
 | Must-have moments | Live waterfall; coding-assistant sessions with cost | Most visual, most distinctive |
 | Gateway clients | Claude Code, Copilot Chat, Copilot CLI | All three on day one |
 | SDK language | Python only | Enough for v1 |
+| Name | LucentPad (`lucentpad` in code) | Chosen by the user; free on PyPI, npm and GitHub |
+| Static demo | In-browser, on GitHub Pages | Free, always up, no backend to keep alive |
 | Hosted demo | Read-only seeded data | No sign-in or key handling needed |
-| Failover | Retry, then same-provider model fallback | Simple; no Prism-held keys |
+| Failover | Retry, then same-provider model fallback | Simple; no LucentPad-held keys |
 | Guardrails | Redaction, rule-based blocking, budget alerts | Predictable, no added latency |
 | Engineering depth | Streaming correctness, high-volume ingestion, OTel-shaped spans | Strongest interview talking points |
 | Demo agent | Customer support with fake-data tools | Free, repeatable, shows every feature |
@@ -159,7 +163,7 @@ Open questions (answer by the milestone shown):
 
 ## Handing this to Claude Code
 
-One Claude Code session builds Prism, one milestone at a time, with this PRD as the source of truth.
+One Claude Code session builds LucentPad, one milestone at a time, with this PRD as the source of truth.
 
 Setup:
 
@@ -168,7 +172,7 @@ Setup:
 3. Start a fresh session in the repo, on Opus, and paste the prompt below.
 
 ```
-You are building Prism. docs/PRD.md is the source of truth; read it fully first.
+You are building LucentPad. docs/PRD.md is the source of truth; read it fully first.
 
 Work one milestone at a time, starting with M0. For each milestone:
 1. Plan: post a short task list (what you'll build, which files, how I'll

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from prism_server import sample
-from prism_server.pricing import PRICES, cost_usd
-from prism_server.schema import Attr, EventName, Span
+from lucentpad_server import sample
+from lucentpad_server.pricing import PRICES, cost_usd
+from lucentpad_server.schema import Attr, EventName, Span
 
 from .support import NOW
 

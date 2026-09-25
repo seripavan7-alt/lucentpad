@@ -1,5 +1,5 @@
 /*
- * Prism design tokens. Light theme on :root; dark theme via [data-theme="dark"], or via
+ * LucentPad design tokens. Light theme on :root; dark theme via [data-theme="dark"], or via
  * prefers-color-scheme when the user hasn't made an explicit choice (no data-theme attribute).
  * Components use only these custom properties, never raw values.
  */

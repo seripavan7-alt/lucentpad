@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest_asyncio
 
-from prism_server.app import create_app
+from lucentpad_server.app import create_app
 
 
 @pytest_asyncio.fixture

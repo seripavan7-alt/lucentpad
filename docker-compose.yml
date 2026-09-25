@@ -1,15 +1,16 @@
 # Local dev stack: `make dev`, then open http://localhost:5173
+name: lucentpad  # fixed project name, so containers/volumes do not depend on the folder name
 services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: prism
-      POSTGRES_PASSWORD: prism  # local-only dev credential
-      POSTGRES_DB: prism
+      POSTGRES_USER: lucentpad
+      POSTGRES_PASSWORD: lucentpad  # local-only dev credential
+      POSTGRES_DB: lucentpad
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U prism -d prism"]
+      test: ["CMD-SHELL", "pg_isready -U lucentpad -d lucentpad"]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -19,8 +20,8 @@ services:
       context: .
       dockerfile: server/Dockerfile
     environment:
-      DATABASE_URL: postgresql://prism:prism@db:5432/prism
-      PRISM_SEED_SAMPLE: "1"
+      DATABASE_URL: postgresql://lucentpad:lucentpad@db:5432/lucentpad
+      LUCENTPAD_SEED_SAMPLE: "1"
       PORT: "8000"
     ports: ["8000:8000"]
     healthcheck:
@@ -35,7 +36,7 @@ services:
     build:
       context: dashboard
     environment:
-      PRISM_API_URL: http://api:8000
+      LUCENTPAD_API_URL: http://api:8000
     ports: ["5173:5173"]
     volumes:
       - ./dashboard/src:/app/src

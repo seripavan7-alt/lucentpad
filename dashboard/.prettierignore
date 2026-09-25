@@ -1,4 +1,6 @@
 dist
+dist-site
 node_modules
 package-lock.json
 src/api/schema.d.ts
+src/demo/*.json

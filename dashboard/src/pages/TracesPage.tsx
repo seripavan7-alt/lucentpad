@@ -128,8 +128,8 @@ export function TracesPage() {
             />
           ) : (
             <EmptyState title="No traces yet">
-              Run an agent with the Prism SDK or point a coding assistant at the gateway, and its
-              traces will show up here.
+              Run an agent with the LucentPad SDK or point a coding assistant at the gateway, and
+              its traces will show up here.
             </EmptyState>
           )
         ) : (

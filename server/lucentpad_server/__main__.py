@@ -1,4 +1,4 @@
-"""Run the API: ``python -m prism_server`` (listens on 0.0.0.0:$PORT, default 8000)."""
+"""Run the API: ``python -m lucentpad_server`` (listens on 0.0.0.0:$PORT, default 8000)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 
 import uvicorn
 
-from prism_server.app import create_app
+from lucentpad_server.app import create_app
 
 
 def main() -> None:

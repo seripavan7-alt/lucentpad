@@ -1,4 +1,4 @@
-"""Shared fixtures. DB tests use ``$PRISM_TEST_DATABASE_URL`` or a throwaway testcontainers
+"""Shared fixtures. DB tests use ``$LUCENTPAD_TEST_DATABASE_URL`` or a throwaway testcontainers
 Postgres; every test (or module, for read-only suites) gets its own freshly created database."""
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _default_docker_host() -> None:
 
 @pytest.fixture(scope="session")
 def pg_base_url() -> Iterator[str]:
-    url = os.environ.get("PRISM_TEST_DATABASE_URL")
+    url = os.environ.get("LUCENTPAD_TEST_DATABASE_URL")
     if url:
         yield url
         return
@@ -44,7 +44,7 @@ def _with_database(url: str, name: str) -> str:
 
 @asynccontextmanager
 async def _fresh_database(base_url: str) -> AsyncIterator[str]:
-    name = f"prism_test_{uuid4().hex[:12]}"
+    name = f"lucentpad_test_{uuid4().hex[:12]}"
     admin = await asyncpg.connect(base_url)
     try:
         await admin.execute(f'CREATE DATABASE "{name}"')

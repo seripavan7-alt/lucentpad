@@ -8,9 +8,9 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
-from prism_server import db
-from prism_server.schema import Attr, Span, SpanEvent
-from prism_server.store import Cursor, InvalidCursorError, SpanStore
+from lucentpad_server import db
+from lucentpad_server.schema import Attr, Span, SpanEvent
+from lucentpad_server.store import Cursor, InvalidCursorError, SpanStore
 
 from .support import NOW
 
@@ -81,7 +81,7 @@ async def test_aggregates_and_roundtrip(pool: asyncpg.Pool) -> None:
         attributes={Attr.SERVICE_NAME: "support-agent", Attr.CLIENT: "sdk"},
         end_time=NOW,
     )
-    event = SpanEvent(name="prism.failover", time=NOW, attributes={"n": 1, "f": 0.5})
+    event = SpanEvent(name="lucentpad.failover", time=NOW, attributes={"n": 1, "f": 0.5})
     spans = [
         root,
         _llm("a000000000000001", 10, "claude-sonnet-5", 1000, 100, events=[event]),

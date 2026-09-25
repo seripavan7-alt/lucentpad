@@ -36,7 +36,7 @@ export function AppRoutes() {
             <PlaceholderPage
               title="Gateway"
               milestone="M2"
-              description="A live feed of Claude Code and Copilot requests through the Prism gateway, with tokens, cost and failovers per turn."
+              description="A live feed of Claude Code and Copilot requests through the LucentPad gateway, with tokens, cost and failovers per turn."
             />
           }
         />
@@ -56,7 +56,7 @@ export function AppRoutes() {
             <PlaceholderPage
               title="Evals"
               milestone="M3"
-              description="Results of prism eval runs against the baseline, including CI regressions."
+              description="Results of lucentpad eval runs against the baseline, including CI regressions."
             />
           }
         />

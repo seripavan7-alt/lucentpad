@@ -1,6 +1,6 @@
-# Prism API image. Build with the REPO ROOT as context (uv.lock and the workspace
+# LucentPad API image. Build with the REPO ROOT as context (uv.lock and the workspace
 # pyproject.toml live there):
-#   docker build -f server/Dockerfile -t prism-server .
+#   docker build -f server/Dockerfile -t lucentpad-server .
 
 # ---- build: resolve from uv.lock into /app/.venv --------------------------------------------
 FROM python:3.12-slim AS build
@@ -18,18 +18,18 @@ WORKDIR /src
 COPY pyproject.toml uv.lock ./
 COPY server/pyproject.toml server/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package prism-server --no-install-workspace
+    uv sync --frozen --no-dev --package lucentpad-server --no-install-workspace
 
 # Then the server package itself, installed non-editable so /src is not needed at runtime.
 COPY server/ server/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package prism-server --no-editable
+    uv sync --frozen --no-dev --package lucentpad-server --no-editable
 
 # ---- runtime ---------------------------------------------------------------------------------
 FROM python:3.12-slim
 
-RUN groupadd --system --gid 10001 prism \
-    && useradd --system --uid 10001 --gid prism --no-create-home --shell /usr/sbin/nologin prism
+RUN groupadd --system --gid 10001 lucentpad \
+    && useradd --system --uid 10001 --gid lucentpad --no-create-home --shell /usr/sbin/nologin lucentpad
 
 COPY --from=build --chown=root:root /app/.venv /app/.venv
 
@@ -38,8 +38,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
 
-USER prism
+USER lucentpad
 WORKDIR /app
 EXPOSE 8000
 
-CMD ["python", "-m", "prism_server"]
+CMD ["python", "-m", "lucentpad_server"]

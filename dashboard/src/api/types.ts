@@ -19,7 +19,7 @@ export type ListTracesParams = NonNullable<
 export const SPAN_SOURCES = ["sdk", "gateway"] as const satisfies readonly SpanSource[];
 export const SPAN_STATUSES = ["ok", "error", "blocked"] as const satisfies readonly SpanStatus[];
 
-/** Attribute keys; mirrors `Attr` in server/prism_server/schema.py. */
+/** Attribute keys; mirrors `Attr` in server/lucentpad_server/schema.py. */
 export const Attr = {
   SERVICE_NAME: "service.name",
   GEN_AI_SYSTEM: "gen_ai.system",
@@ -30,17 +30,17 @@ export const Attr = {
   GEN_AI_OUTPUT_TOKENS: "gen_ai.usage.output_tokens",
   GEN_AI_FINISH_REASONS: "gen_ai.response.finish_reasons",
   GEN_AI_TOOL_NAME: "gen_ai.tool.name",
-  COST_USD: "prism.cost_usd",
-  STREAMING: "prism.streaming",
-  CLIENT: "prism.client",
-  SESSION_ID: "prism.session_id",
-  GUARDRAIL_RULE: "prism.guardrail.rule",
+  COST_USD: "lucentpad.cost_usd",
+  STREAMING: "lucentpad.streaming",
+  CLIENT: "lucentpad.client",
+  SESSION_ID: "lucentpad.session_id",
+  GUARDRAIL_RULE: "lucentpad.guardrail.rule",
 } as const;
 
-/** Event names; mirrors `EventName` in server/prism_server/schema.py. */
+/** Event names; mirrors `EventName` in server/lucentpad_server/schema.py. */
 export const EventName = {
-  FAILOVER: "prism.failover",
-  BUDGET_ALERT: "prism.budget.alert",
-  REDACTION: "prism.redaction",
-  GUARDRAIL_BLOCK: "prism.guardrail.block",
+  FAILOVER: "lucentpad.failover",
+  BUDGET_ALERT: "lucentpad.budget.alert",
+  REDACTION: "lucentpad.redaction",
+  GUARDRAIL_BLOCK: "lucentpad.guardrail.block",
 } as const;
