@@ -1,0 +1,240 @@
+.waterfall {
+  --name-col: minmax(220px, 34%);
+  position: relative;
+  font-size: var(--text-sm);
+}
+
+.empty {
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.header,
+.row {
+  display: grid;
+  grid-template-columns: var(--name-col) minmax(0, 1fr);
+}
+
+.header {
+  height: 28px;
+  border-bottom: var(--border);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-feature-settings: var(--font-features-numeric);
+}
+
+.headerName {
+  display: flex;
+  align-items: center;
+  padding-left: var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.axis {
+  position: relative;
+  margin: 0 var(--space-6) 0 var(--space-3);
+}
+
+.tick {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.tick:first-child {
+  transform: translate(0, -50%);
+}
+
+.tick[data-edge="end"] {
+  transform: translate(-100%, -50%);
+}
+
+.rows {
+  position: relative;
+}
+
+.gridlines {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--name-col) minmax(0, 1fr);
+  pointer-events: none;
+}
+
+.gridTrack {
+  position: relative;
+  grid-column: 2;
+  margin: 0 var(--space-6) 0 var(--space-3);
+}
+
+.gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--color-border);
+}
+
+.row {
+  position: relative;
+  width: 100%;
+  height: var(--waterfall-row-height);
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+
+.row:hover {
+  background: var(--color-surface-hover);
+}
+
+.row[aria-pressed="true"] {
+  background: var(--color-surface-selected);
+}
+
+.row:focus-visible {
+  outline-offset: -2px;
+}
+
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-right: var(--space-3);
+  border-right: var(--border);
+}
+
+.kindSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--kind-color);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+
+.subtitle {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0;
+}
+
+.statusFlag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+}
+
+.statusFlag[data-status="error"] {
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+}
+
+.statusFlag[data-status="blocked"] {
+  color: var(--color-blocked);
+  background: var(--color-blocked-subtle);
+}
+
+.track {
+  position: relative;
+  margin: 0 var(--space-6) 0 var(--space-3);
+}
+
+.bar {
+  position: absolute;
+  top: 50%;
+  height: 12px;
+  min-width: 2px;
+  transform: translateY(-50%);
+  border-radius: var(--radius-xs);
+  background: var(--kind-color);
+  opacity: 0.9;
+}
+
+.row[data-kind="agent"] .bar {
+  height: 8px;
+  opacity: 0.55;
+}
+
+.row[data-status="error"] .bar {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-error) 0 4px,
+    color-mix(in srgb, var(--color-error) 70%, transparent) 4px 8px
+  );
+}
+
+.row[data-status="blocked"] .bar {
+  box-shadow: 0 0 0 1.5px var(--color-blocked);
+}
+
+.duration {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-feature-settings: var(--font-features-numeric);
+  white-space: nowrap;
+}
+
+.marker {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border: 1.5px solid var(--color-surface);
+  border-radius: 1px;
+  background: var(--color-text-secondary);
+  z-index: 1;
+}
+
+.marker[data-tone="warning"] {
+  background: var(--color-warning);
+}
+
+.marker[data-tone="blocked"] {
+  background: var(--color-blocked);
+}
+
+.marker[data-tone="info"] {
+  background: var(--color-accent);
+}
+
+.row[data-kind="agent"] {
+  --kind-color: var(--kind-agent);
+}
+
+.row[data-kind="llm"] {
+  --kind-color: var(--kind-llm);
+}
+
+.row[data-kind="tool"] {
+  --kind-color: var(--kind-tool);
+}
+
+.row[data-kind="guardrail"] {
+  --kind-color: var(--kind-guardrail);
+}

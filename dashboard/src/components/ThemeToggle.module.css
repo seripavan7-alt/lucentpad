@@ -1,0 +1,29 @@
+.group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.option {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+}
+
+.option:hover {
+  color: var(--color-text);
+}
+
+.option[aria-pressed="true"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}

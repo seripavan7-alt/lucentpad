@@ -1,0 +1,228 @@
+/*
+ * Prism design tokens. Light theme on :root; dark theme via [data-theme="dark"], or via
+ * prefers-color-scheme when the user hasn't made an explicit choice (no data-theme attribute).
+ * Components use only these custom properties, never raw values.
+ */
+
+:root {
+  /* Typography */
+  --font-sans:
+    "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  --font-features: "cv11", "ss01", "calt";
+  --font-features-numeric: "tnum", "cv11", "ss01", "calt";
+
+  --text-2xs: 0.6875rem; /* 11px */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.8125rem; /* 13px (base UI) */
+  --text-md: 0.875rem; /* 14px */
+  --text-lg: 1rem; /* 16px */
+  --text-xl: 1.25rem; /* 20px */
+  --text-2xl: 1.5rem; /* 24px */
+
+  --weight-regular: 400;
+  --weight-medium: 510;
+  --weight-semibold: 590;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --tracking-tight: -0.011em;
+  --tracking-caps: 0.04em;
+
+  /* Spacing (4px grid) */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Radii */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  /* Borders */
+  --border-width: 1px;
+  --border: var(--border-width) solid var(--color-border);
+  --border-strong: var(--border-width) solid var(--color-border-strong);
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --row-height: 36px;
+  --waterfall-row-height: 30px;
+  --inspector-width: 380px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---------- Light palette ---------- */
+  color-scheme: light;
+
+  /* Neutral scale (cool gray) */
+  --gray-0: #ffffff;
+  --gray-50: #fbfbfc;
+  --gray-100: #f4f5f7;
+  --gray-150: #eeeff2;
+  --gray-200: #e6e7eb;
+  --gray-300: #d6d8de;
+  --gray-400: #b4b7c0;
+  --gray-500: #8a8e98;
+  --gray-600: #6b6f79;
+  --gray-700: #4c4f57;
+  --gray-800: #2e3035;
+  --gray-900: #1b1c1f;
+
+  --color-bg: var(--gray-50);
+  --color-surface: var(--gray-0);
+  --color-surface-subtle: var(--gray-100);
+  --color-surface-hover: var(--gray-150);
+  --color-surface-selected: #eef0fb;
+  --color-sidebar: var(--gray-100);
+  --color-border: var(--gray-200);
+  --color-border-strong: var(--gray-300);
+  --color-text: var(--gray-900);
+  --color-text-secondary: var(--gray-600);
+  --color-text-tertiary: var(--gray-500);
+  --color-text-inverse: var(--gray-0);
+
+  /* Accent (indigo) */
+  --color-accent: #5e6ad2;
+  --color-accent-hover: #4f5bc4;
+  --color-accent-subtle: #eef0fb;
+  --color-accent-text: #4450b8;
+  --color-focus-ring: rgb(94 106 210 / 45%);
+
+  /* Semantic */
+  --color-ok: #1f8a5b;
+  --color-ok-subtle: #e6f4ed;
+  --color-error: #d0453b;
+  --color-error-subtle: #fbeceb;
+  --color-blocked: #cc6516;
+  --color-blocked-subtle: #fbeee3;
+  --color-warning: #b98a06;
+  --color-warning-subtle: #faf3dc;
+
+  /* Span kinds */
+  --kind-agent: #8e93a0;
+  --kind-llm: #5e6ad2;
+  --kind-tool: #178c95;
+  --kind-guardrail: #cc6516;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgb(16 18 24 / 6%);
+  --shadow-md: 0 2px 8px rgb(16 18 24 / 8%), 0 0 0 1px rgb(16 18 24 / 4%);
+  --shadow-lg: 0 12px 32px rgb(16 18 24 / 12%), 0 0 0 1px rgb(16 18 24 / 5%);
+}
+
+/* ---------- Dark palette ---------- */
+/* Kept in sync by hand: the explicit choice and the system preference share these values. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --gray-0: #0e0f11;
+  --gray-50: #121315;
+  --gray-100: #17181b;
+  --gray-150: #1e1f23;
+  --gray-200: #26282d;
+  --gray-300: #32343a;
+  --gray-400: #4a4d55;
+  --gray-500: #6e717b;
+  --gray-600: #9a9da6;
+  --gray-700: #bfc1c8;
+  --gray-800: #dcdde2;
+  --gray-900: #ecedf0;
+
+  --color-bg: var(--gray-50);
+  --color-surface: var(--gray-100);
+  --color-surface-subtle: var(--gray-150);
+  --color-surface-hover: var(--gray-200);
+  --color-surface-selected: #23264a;
+  --color-sidebar: var(--gray-0);
+  --color-text-inverse: var(--gray-0);
+
+  --color-accent: #7c85e8;
+  --color-accent-hover: #9097ee;
+  --color-accent-subtle: #22254a;
+  --color-accent-text: #a4aaf2;
+  --color-focus-ring: rgb(124 133 232 / 50%);
+
+  --color-ok: #3fb67f;
+  --color-ok-subtle: #15291f;
+  --color-error: #ef6a5f;
+  --color-error-subtle: #33191a;
+  --color-blocked: #eb8a3c;
+  --color-blocked-subtle: #33230f;
+  --color-warning: #e2b33a;
+  --color-warning-subtle: #2f2710;
+
+  --kind-agent: #7b808c;
+  --kind-llm: #7c85e8;
+  --kind-tool: #34b3bb;
+  --kind-guardrail: #eb8a3c;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 5%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --gray-0: #0e0f11;
+    --gray-50: #121315;
+    --gray-100: #17181b;
+    --gray-150: #1e1f23;
+    --gray-200: #26282d;
+    --gray-300: #32343a;
+    --gray-400: #4a4d55;
+    --gray-500: #6e717b;
+    --gray-600: #9a9da6;
+    --gray-700: #bfc1c8;
+    --gray-800: #dcdde2;
+    --gray-900: #ecedf0;
+
+    --color-bg: var(--gray-50);
+    --color-surface: var(--gray-100);
+    --color-surface-subtle: var(--gray-150);
+    --color-surface-hover: var(--gray-200);
+    --color-surface-selected: #23264a;
+    --color-sidebar: var(--gray-0);
+    --color-text-inverse: var(--gray-0);
+
+    --color-accent: #7c85e8;
+    --color-accent-hover: #9097ee;
+    --color-accent-subtle: #22254a;
+    --color-accent-text: #a4aaf2;
+    --color-focus-ring: rgb(124 133 232 / 50%);
+
+    --color-ok: #3fb67f;
+    --color-ok-subtle: #15291f;
+    --color-error: #ef6a5f;
+    --color-error-subtle: #33191a;
+    --color-blocked: #eb8a3c;
+    --color-blocked-subtle: #33230f;
+    --color-warning: #e2b33a;
+    --color-warning-subtle: #2f2710;
+
+    --kind-agent: #7b808c;
+    --kind-llm: #7c85e8;
+    --kind-tool: #34b3bb;
+    --kind-guardrail: #eb8a3c;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+    --shadow-md: 0 2px 8px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 4%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 5%);
+  }
+}

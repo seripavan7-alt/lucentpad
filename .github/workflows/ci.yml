@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: prism
+          POSTGRES_PASSWORD: prism
+          POSTGRES_DB: prism_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U prism -d prism_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      PRISM_TEST_DATABASE_URL: postgresql://prism:prism@localhost:5432/prism_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: make install
+      - run: make check
+
+  compose:
+    # Proves `make dev` works: the stack builds, migrates, seeds and serves sample traces.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build -d --wait db api
+      - run: |
+          for i in $(seq 1 30); do
+            n=$(curl -sf "http://localhost:8000/v1/traces?limit=5" | jq '.traces | length') && [ "$n" -gt 0 ] && { echo "api serves $n traces"; exit 0; }
+            sleep 2
+          done
+          docker compose logs api; exit 1
+      - run: docker compose up --build -d dashboard
+      - run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5173/v1/traces?limit=1 >/dev/null && curl -sf http://localhost:5173/ | grep -q '<div id="root"' && { echo "dashboard up and proxying"; exit 0; }
+            sleep 2
+          done
+          docker compose logs dashboard; exit 1
+      - if: always()
+        run: docker compose down -v
