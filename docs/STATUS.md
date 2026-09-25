@@ -5,7 +5,8 @@ Source of truth: `docs/PRD.md`. Process: plan → "go" → build → checkpoint 
 
 ## Now
 - **Milestone:** M1 SDK and live waterfall. **Plan drafted, not yet approved** (needs the user's "go").
-- **Next action:** Step 0 in `docs/handoff/M1.md`: ask the user decisions D1–D7 and record them below.
+- **Next action:** Part A (prerequisites) in `docs/handoff/M1.md`: step R0, ask the user D11–D13; then
+  R1–R4 (time range + filter panel on Traces). Step 0 (D1–D10) can be asked at the same time.
 - **Blockers:** none besides the step 0 answers.
 
 ## M1 step log
@@ -14,7 +15,12 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 
 | Step | State | Owner / date | Handoff notes |
 | --- | --- | --- | --- |
-| 0 Decisions D1–D7 | ⬜ | | |
+| R0 Decisions D11–D13 | ⬜ | | |
+| R1 Contract: time window, filters, facets | ⬜ | | |
+| R2 Backend filters + facets (`server/`) | ⬜ | | |
+| R3 Dashboard range picker + filter panel (`dashboard/`) | ⬜ | | |
+| R4 Verify | ⬜ | | |
+| 0 Decisions D1–D10 | ⬜ | | |
 | 1 Git and GitHub | ⬜ | | |
 | 2 Contract and scaffolding | ⬜ | | |
 | 3 Ingest pipeline (`server/`) | ⬜ | | |
@@ -53,4 +59,6 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 | 2026-09-25 | Failover and budget alerts are span *events*; guardrail blocks are their own span (`kind=guardrail`). |
 | 2026-09-25 | Dashboard API types are generated from `contracts/openapi.json`; `make check` fails on drift. |
 | 2026-09-25 | `spans` PK is `(trace_id, span_id)`; trace status = worst span (blocked > error > ok); malformed trace_id → 404; bad cursor → 422. |
+| 2026-09-25 | M1 scope extended by user: absolute timestamps, input/output previews, time sort on the traces list (D8–D10 in `docs/handoff/M1.md`; recommendations pending confirmation). |
+| 2026-09-25 | M0 refinements (15-min default view, time-range picker, left filter panel with name + other filters) added as M1 prerequisites R0–R4; not built. |
 | 2026-09-25 | Work is split into handoff-ready steps (`docs/handoff/M<n>.md`) so any agent can resume any step. |
