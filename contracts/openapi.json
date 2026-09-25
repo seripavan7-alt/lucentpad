@@ -15,6 +15,25 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "FacetValue": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "FacetValue",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -32,6 +51,7 @@
         "additionalProperties": false,
         "properties": {
           "accepted": {
+            "description": "Spans queued for writing (always the whole batch).",
             "title": "Accepted",
             "type": "integer"
           }
@@ -40,6 +60,49 @@
           "accepted"
         ],
         "title": "IngestAccepted",
+        "type": "object"
+      },
+      "IngestStats": {
+        "additionalProperties": false,
+        "description": "Counters of the ingest pipeline since the API started.",
+        "properties": {
+          "accepted_total": {
+            "title": "Accepted Total",
+            "type": "integer"
+          },
+          "queue_capacity": {
+            "title": "Queue Capacity",
+            "type": "integer"
+          },
+          "queue_depth": {
+            "description": "Spans accepted but not yet written.",
+            "title": "Queue Depth",
+            "type": "integer"
+          },
+          "rejected_total": {
+            "description": "Spans refused with 429 because the queue was full.",
+            "title": "Rejected Total",
+            "type": "integer"
+          },
+          "write_errors_total": {
+            "description": "Spans dropped after the writer gave up retrying.",
+            "title": "Write Errors Total",
+            "type": "integer"
+          },
+          "written_total": {
+            "title": "Written Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue_depth",
+          "queue_capacity",
+          "accepted_total",
+          "rejected_total",
+          "written_total",
+          "write_errors_total"
+        ],
+        "title": "IngestStats",
         "type": "object"
       },
       "Span": {
@@ -239,8 +302,14 @@
       "TraceDetail": {
         "additionalProperties": false,
         "properties": {
+          "as_of": {
+            "description": "Server time of this response; pass it as `since` on the next live poll.",
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
           "spans": {
-            "description": "All spans in the trace, ordered by start_time.",
+            "description": "Spans ordered by start_time: all of them, or with `since` only those stored after it.",
             "items": {
               "$ref": "#/components/schemas/Span"
             },
@@ -253,14 +322,79 @@
         },
         "required": [
           "trace",
-          "spans"
+          "spans",
+          "as_of"
         ],
         "title": "TraceDetail",
+        "type": "object"
+      },
+      "TraceFacets": {
+        "additionalProperties": false,
+        "description": "Value counts per filter. Each facet's counts apply every other filter but not its own,\nso ticking a value never hides its siblings. At most ``FACET_MAX_VALUES`` values per facet,\nby count descending, then value.",
+        "properties": {
+          "client": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Client",
+            "type": "array"
+          },
+          "model": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Model",
+            "type": "array"
+          },
+          "name": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Name",
+            "type": "array"
+          },
+          "service": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Service",
+            "type": "array"
+          },
+          "source": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Source",
+            "type": "array"
+          },
+          "status": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Status",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "source",
+          "client",
+          "model",
+          "service"
+        ],
+        "title": "TraceFacets",
         "type": "object"
       },
       "TraceList": {
         "additionalProperties": false,
         "properties": {
+          "as_of": {
+            "description": "Server time of this response; pass it as `since` on the next live poll.",
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
           "next_cursor": {
             "anyOf": [
               {
@@ -270,7 +404,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opaque cursor for the next page; null when there are no more traces.",
+            "description": "Opaque cursor for the next page; null when there are no more traces. Valid only with the same order and filters.",
             "title": "Next Cursor"
           },
           "traces": {
@@ -283,7 +417,8 @@
         },
         "required": [
           "traces",
-          "next_cursor"
+          "next_cursor",
+          "as_of"
         ],
         "title": "TraceList",
         "type": "object"
@@ -311,6 +446,18 @@
             "title": "Duration Ms",
             "type": "number"
           },
+          "input_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's first user message (root span's input, else the earliest llm span's); null when capture is off.",
+            "title": "Input Preview"
+          },
           "input_tokens": {
             "title": "Input Tokens",
             "type": "integer"
@@ -329,6 +476,18 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "output_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's final answer (root span's output, else the latest llm span's).",
+            "title": "Output Preview"
           },
           "output_tokens": {
             "title": "Output Tokens",
@@ -390,7 +549,9 @@
           "input_tokens",
           "output_tokens",
           "cost_usd",
-          "models"
+          "models",
+          "input_preview",
+          "output_preview"
         ],
         "title": "TraceSummary",
         "type": "object"
@@ -468,8 +629,30 @@
         ]
       }
     },
+    "/v1/ingest/stats": {
+      "get": {
+        "operationId": "ingest_stats_v1_ingest_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ingest Stats",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
     "/v1/spans": {
       "post": {
+        "description": "Queue a batch for writing and return at once; spans are readable shortly after.",
         "operationId": "ingest_spans_v1_spans_post",
         "requestBody": {
           "content": {
@@ -492,6 +675,16 @@
             },
             "description": "Successful Response"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Body larger than the ingest limit."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -510,17 +703,14 @@
                 }
               }
             },
-            "description": "Ingest queue full; retry later."
-          },
-          "501": {
-            "content": {
-              "application/json": {
+            "description": "Ingest queue full; nothing from the batch was accepted. Retry after the `Retry-After` header (seconds).",
+            "headers": {
+              "Retry-After": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "type": "integer"
                 }
               }
-            },
-            "description": "Not implemented until M1."
+            }
           }
         },
         "summary": "Ingest Spans",
@@ -546,6 +736,7 @@
             }
           },
           {
+            "description": "`next_cursor` of the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -558,7 +749,124 @@
                   "type": "null"
                 }
               ],
+              "description": "`next_cursor` of the previous page.",
               "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "desc",
+                "asc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Live polling: only traces that gained spans after this time (the previous response's `as_of`). Includes a few seconds of overlap, so expect traces already seen and merge by `trace_id`. Not combinable with `cursor`.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Live polling: only traces that gained spans after this time (the previous response's `as_of`). Includes a few seconds of overlap, so expect traces already seen and merge by `trace_id`. Not combinable with `cursor`.",
+              "title": "Since"
+            }
+          },
+          {
+            "description": "Traces starting at or after this time (inclusive).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Traces starting at or after this time (inclusive).",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Traces starting before this time (exclusive).",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Traces starting before this time (exclusive).",
+              "title": "To"
+            }
+          },
+          {
+            "description": "Trace name; repeat for OR.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Trace name; repeat for OR.",
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "ok",
+                      "error",
+                      "blocked"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
             }
           },
           {
@@ -568,11 +876,14 @@
             "schema": {
               "anyOf": [
                 {
-                  "enum": [
-                    "sdk",
-                    "gateway"
-                  ],
-                  "type": "string"
+                  "items": {
+                    "enum": [
+                      "sdk",
+                      "gateway"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
@@ -583,23 +894,63 @@
           },
           {
             "in": "query",
-            "name": "status",
+            "name": "client",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "enum": [
-                    "ok",
-                    "error",
-                    "blocked"
-                  ],
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Status"
+              "title": "Client"
+            }
+          },
+          {
+            "description": "Matches traces that used any of these models.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matches traces that used any of these models.",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "`service.name`.",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`service.name`.",
+              "title": "Service"
             }
           }
         ],
@@ -623,9 +974,229 @@
               }
             },
             "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Filter not implemented yet."
           }
         },
         "summary": "List Traces",
+        "tags": [
+          "query"
+        ]
+      }
+    },
+    "/v1/traces/facets": {
+      "get": {
+        "operationId": "trace_facets_v1_traces_facets_get",
+        "parameters": [
+          {
+            "description": "Traces starting at or after this time (inclusive).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Traces starting at or after this time (inclusive).",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Traces starting before this time (exclusive).",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Traces starting before this time (exclusive).",
+              "title": "To"
+            }
+          },
+          {
+            "description": "Trace name; repeat for OR.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Trace name; repeat for OR.",
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "ok",
+                      "error",
+                      "blocked"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "sdk",
+                      "gateway"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client"
+            }
+          },
+          {
+            "description": "Matches traces that used any of these models.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matches traces that used any of these models.",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "`service.name`.",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`service.name`.",
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceFacets"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Trace Facets",
         "tags": [
           "query"
         ]
@@ -642,6 +1213,25 @@
             "schema": {
               "title": "Trace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Live polling: only spans stored after this time (the previous response's `as_of`), with a few seconds of overlap; merge by `span_id`. The summary is always current.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Live polling: only spans stored after this time (the previous response's `as_of`), with a few seconds of overlap; merge by `span_id`. The summary is always current.",
+              "title": "Since"
             }
           }
         ],

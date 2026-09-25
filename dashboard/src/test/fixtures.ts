@@ -3,7 +3,14 @@
  * demo in docs/PRD.md: a support agent run, a guardrail block, a Claude Code
  * session with a failover, and a failed Copilot CLI call.
  */
-import type { Span, SpanEvent, TraceDetail, TraceList, TraceSummary } from "../api/types";
+import type {
+  Span,
+  SpanEvent,
+  TraceDetail,
+  TraceFacets,
+  TraceList,
+  TraceSummary,
+} from "../api/types";
 import { Attr, EventName } from "../api/types";
 
 export const BASE_TIME = Date.parse("2026-09-25T10:00:00.000Z");
@@ -59,6 +66,18 @@ const tool = (name: string) => ({
   [Attr.GEN_AI_TOOL_NAME]: name,
 });
 
+/** A captured prompt long enough to collapse in the inspector (8 lines). */
+export const LONG_INPUT = [
+  "System: You are a support agent for Acme.",
+  "User: Where's order 1042?",
+  "I want a refund.",
+  "It arrived broken.",
+  "The box was crushed.",
+  "Please help.",
+  "Thanks,",
+  "Sam",
+].join("\n");
+
 // Support agent: "Where's order 1042? I want a refund." Root 0–4200ms.
 export const supportSpans: Span[] = spansFor(SUPPORT_TRACE_ID, "sdk", [
   {
@@ -78,7 +97,13 @@ export const supportSpans: Span[] = spansFor(SUPPORT_TRACE_ID, "sdk", [
     kind: "llm",
     start: 50,
     end: 1250,
-    attributes: llm("claude-sonnet-4-5", 1840, 212, 0.0087),
+    attributes: {
+      ...llm("claude-sonnet-4-5", 1840, 212, 0.0087),
+      [Attr.INPUT_PREVIEW]: LONG_INPUT,
+      [Attr.INPUT_TRUNCATED]: true,
+      [Attr.OUTPUT_PREVIEW]: "Let me look up order 1042.",
+      [Attr.OUTPUT_TRUNCATED]: false,
+    },
     events: [event(EventName.REDACTION, 60, { kind: "email", count: 1 })],
   },
   {
@@ -143,6 +168,8 @@ export const supportSummary: TraceSummary = {
   output_tokens: 560,
   cost_usd: 0.0209,
   models: ["claude-sonnet-4-5"],
+  input_preview: "Where's order 1042?\nI want a refund.",
+  output_preview: "I've issued a refund of $42.00 for order 1042.",
 };
 
 export const blockedSpans: Span[] = spansFor(BLOCKED_TRACE_ID, "sdk", [
@@ -194,6 +221,8 @@ export const blockedSummary: TraceSummary = {
   output_tokens: 96,
   cost_usd: 0.0054,
   models: ["claude-sonnet-4-5"],
+  input_preview: null,
+  output_preview: null,
 };
 
 export const claudeCodeSpans: Span[] = spansFor(CLAUDE_CODE_TRACE_ID, "gateway", [
@@ -251,6 +280,8 @@ export const claudeCodeSummary: TraceSummary = {
   output_tokens: 2_350,
   cost_usd: 1.0058,
   models: ["claude-opus-4-1", "claude-sonnet-4-5"],
+  input_preview: null,
+  output_preview: null,
 };
 
 export const copilotSummary: TraceSummary = {
@@ -268,18 +299,69 @@ export const copilotSummary: TraceSummary = {
   output_tokens: 0,
   cost_usd: 0,
   models: ["gpt-4.1"],
+  input_preview: null,
+  output_preview: null,
 };
+
+const AS_OF = "2026-09-25T12:00:00Z";
 
 export const traceListPage1: TraceList = {
   traces: [supportSummary, blockedSummary, claudeCodeSummary],
   next_cursor: "cursor-page-2",
+  as_of: AS_OF,
 };
 
 export const traceListPage2: TraceList = {
   traces: [copilotSummary],
   next_cursor: null,
+  as_of: AS_OF,
 };
 
-export const supportDetail: TraceDetail = { trace: supportSummary, spans: supportSpans };
-export const blockedDetail: TraceDetail = { trace: blockedSummary, spans: blockedSpans };
-export const claudeCodeDetail: TraceDetail = { trace: claudeCodeSummary, spans: claudeCodeSpans };
+export const supportDetail: TraceDetail = {
+  trace: supportSummary,
+  spans: supportSpans,
+  as_of: AS_OF,
+};
+export const blockedDetail: TraceDetail = {
+  trace: blockedSummary,
+  spans: blockedSpans,
+  as_of: AS_OF,
+};
+export const claudeCodeDetail: TraceDetail = {
+  trace: claudeCodeSummary,
+  spans: claudeCodeSpans,
+  as_of: AS_OF,
+};
+
+export const traceFacets: TraceFacets = {
+  name: [
+    { value: "support-agent", count: 12 },
+    { value: "claude-code session", count: 5 },
+    { value: "copilot-cli request", count: 2 },
+  ],
+  status: [
+    { value: "ok", count: 15 },
+    { value: "error", count: 3 },
+    { value: "blocked", count: 1 },
+  ],
+  source: [
+    { value: "sdk", count: 12 },
+    { value: "gateway", count: 7 },
+  ],
+  client: [
+    { value: "sdk", count: 12 },
+    { value: "claude-code", count: 5 },
+    { value: "copilot-cli", count: 2 },
+  ],
+  model: Array.from({ length: 12 }, (_, i) => ({ value: `model-${i + 1}`, count: 12 - i })),
+  service: [{ value: "support-agent", count: 12 }],
+};
+
+export const emptyFacets: TraceFacets = {
+  name: [],
+  status: [],
+  source: [],
+  client: [],
+  model: [],
+  service: [],
+};

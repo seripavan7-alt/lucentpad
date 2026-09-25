@@ -1,0 +1,20 @@
+[project]
+name = "support-agent"
+version = "0.0.0"
+license = "Apache-2.0"
+description = "LucentPad demo: a customer-support agent for a fictional store, over fake data"
+requires-python = ">=3.12,<3.13"
+dependencies = ["lucentpad-sdk[anthropic]", "httpx2>=2.13.1"]  # --mock-llm transport
+
+[project.scripts]
+support-agent = "support_agent.__main__:main"
+
+[tool.uv.sources]
+lucentpad-sdk = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["support_agent"]

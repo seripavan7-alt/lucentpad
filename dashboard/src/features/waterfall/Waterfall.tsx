@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import type { Span } from "../../api/types";
+import { Attr, type Span } from "../../api/types";
 import { statusLabel } from "../../lib/labels";
-import { formatDuration } from "../../lib/format";
+import { formatCost, formatDuration } from "../../lib/format";
 import { eventLabel, eventTone } from "./events";
 import { spanSubtitle } from "./spanInfo";
 import { buildWaterfall, timeTicks, type WaterfallRow } from "./layout";
@@ -75,6 +75,8 @@ function WaterfallRowView({
 }) {
   const { span } = row;
   const subtitle = spanSubtitle(span);
+  const rawCost = span.attributes?.[Attr.COST_USD];
+  const cost = typeof rawCost === "number" ? rawCost : undefined;
   const barEnd = row.offsetPct + row.widthPct;
   const labelAfter = barEnd < 82;
   return (
@@ -95,11 +97,22 @@ function WaterfallRowView({
           <span className={styles.kindSwatch} aria-hidden="true" />
           <span className={styles.name}>{span.name}</span>
           {subtitle && <span className={styles.subtitle}>{subtitle}</span>}
-          {span.status !== "ok" && (
-            <span className={styles.statusFlag} data-status={span.status}>
-              {statusLabel(span.status)}
-            </span>
-          )}
+          <span className={styles.trailing}>
+            {span.status !== "ok" && (
+              <span className={styles.statusFlag} data-status={span.status}>
+                {statusLabel(span.status)}
+              </span>
+            )}
+            {span.kind === "llm" && (
+              <span
+                className={styles.cost}
+                data-testid="span-cost"
+                title={cost === undefined ? "Cost unknown" : "Cost of this call"}
+              >
+                {cost === undefined ? "–" : formatCost(cost)}
+              </span>
+            )}
+          </span>
         </span>
         <span className={styles.track}>
           <span

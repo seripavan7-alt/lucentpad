@@ -5,19 +5,24 @@ license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 
 [tool.uv.workspace]
-members = ["server"]
+members = ["server", "sdk", "examples/support_agent"]
 
 [tool.uv.sources]
 lucentpad-server = { workspace = true }
+lucentpad-sdk = { workspace = true }
+support-agent = { workspace = true }
 
 [dependency-groups]
 dev = [
   "lucentpad-server",
+  "lucentpad-sdk[anthropic,openai]",
+  "support-agent",
   "ruff>=0.6",
   "mypy>=1.11",
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "httpx>=0.27",
+  "httpx2>=2.13.1",  # provider mocks in SDK tests (anthropic/openai use httpx2)
   "testcontainers[postgres]>=4.8",
   "asyncpg-stubs>=0.29",
 ]
@@ -31,7 +36,7 @@ select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["lucentpad_server"]
+known-first-party = ["lucentpad_server", "lucentpad", "support_agent"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -46,4 +51,4 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-testpaths = ["server/tests"]
+testpaths = ["server/tests", "sdk/tests", "examples/support_agent/tests"]

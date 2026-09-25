@@ -4,12 +4,17 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { formatCost, formatDateTime, formatDuration, formatInteger } from "../../lib/format";
 import { eventLabel, eventTone } from "./events";
 import type { WaterfallRow } from "./layout";
+import { PreviewBlock } from "./PreviewBlock";
 import styles from "./SpanInspector.module.css";
 
 function display(value: AttrValue | undefined): string {
   if (value === undefined) return "–";
   if (Array.isArray(value)) return value.join(", ");
   return String(value);
+}
+
+function text(value: AttrValue | undefined): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function num(value: AttrValue | undefined): number | undefined {
@@ -32,7 +37,14 @@ export function SpanInspector({ row, onClose }: { row: WaterfallRow; onClose: ()
   const model = attrs[Attr.GEN_AI_RESPONSE_MODEL] ?? attrs[Attr.GEN_AI_REQUEST_MODEL];
   const requestModel = attrs[Attr.GEN_AI_REQUEST_MODEL];
   const events = span.events ?? [];
-  const attrEntries = Object.entries(attrs).sort(([a], [b]) => a.localeCompare(b));
+  const input = text(attrs[Attr.INPUT_PREVIEW]);
+  const output = text(attrs[Attr.OUTPUT_PREVIEW]);
+  const showContent = span.kind === "llm";
+  // The previews get their own blocks; don't repeat them in the attribute list.
+  const shownAbove = new Set<string>(showContent ? [Attr.INPUT_PREVIEW, Attr.OUTPUT_PREVIEW] : []);
+  const attrEntries = Object.entries(attrs)
+    .filter(([k]) => !shownAbove.has(k))
+    .sort(([a], [b]) => a.localeCompare(b));
 
   const overview: [string, string][] = [
     ["Kind", KIND_LABELS[span.kind]],
@@ -93,6 +105,31 @@ export function SpanInspector({ row, onClose }: { row: WaterfallRow; onClose: ()
           )}
         </dl>
       </section>
+
+      {showContent && (
+        <section className={styles.section}>
+          {input === undefined && output === undefined ? (
+            <p className={styles.none}>Input and output not captured</p>
+          ) : (
+            <>
+              {input !== undefined && (
+                <PreviewBlock
+                  label="Input"
+                  text={input}
+                  truncated={attrs[Attr.INPUT_TRUNCATED] === true}
+                />
+              )}
+              {output !== undefined && (
+                <PreviewBlock
+                  label="Output"
+                  text={output}
+                  truncated={attrs[Attr.OUTPUT_TRUNCATED] === true}
+                />
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>

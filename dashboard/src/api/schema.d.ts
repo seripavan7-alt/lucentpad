@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ingest/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ingest Stats */
+        get: operations["ingest_stats_v1_ingest_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/spans": {
         parameters: {
             query?: never;
@@ -30,7 +47,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ingest Spans */
+        /**
+         * Ingest Spans
+         * @description Queue a batch for writing and return at once; spans are readable shortly after.
+         */
         post: operations["ingest_spans_v1_spans_post"];
         delete?: never;
         options?: never;
@@ -47,6 +67,23 @@ export interface paths {
         };
         /** List Traces */
         get: operations["list_traces_v1_traces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/traces/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trace Facets */
+        get: operations["trace_facets_v1_traces_facets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -81,6 +118,13 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** FacetValue */
+        FacetValue: {
+            /** Count */
+            count: number;
+            /** Value */
+            value: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -88,8 +132,38 @@ export interface components {
         };
         /** IngestAccepted */
         IngestAccepted: {
-            /** Accepted */
+            /**
+             * Accepted
+             * @description Spans queued for writing (always the whole batch).
+             */
             accepted: number;
+        };
+        /**
+         * IngestStats
+         * @description Counters of the ingest pipeline since the API started.
+         */
+        IngestStats: {
+            /** Accepted Total */
+            accepted_total: number;
+            /** Queue Capacity */
+            queue_capacity: number;
+            /**
+             * Queue Depth
+             * @description Spans accepted but not yet written.
+             */
+            queue_depth: number;
+            /**
+             * Rejected Total
+             * @description Spans refused with 429 because the queue was full.
+             */
+            rejected_total: number;
+            /**
+             * Write Errors Total
+             * @description Spans dropped after the writer gave up retrying.
+             */
+            write_errors_total: number;
+            /** Written Total */
+            written_total: number;
         };
         /** Span */
         Span: {
@@ -164,17 +238,49 @@ export interface components {
         /** TraceDetail */
         TraceDetail: {
             /**
+             * As Of
+             * Format: date-time
+             * @description Server time of this response; pass it as `since` on the next live poll.
+             */
+            as_of: string;
+            /**
              * Spans
-             * @description All spans in the trace, ordered by start_time.
+             * @description Spans ordered by start_time: all of them, or with `since` only those stored after it.
              */
             spans: components["schemas"]["Span"][];
             trace: components["schemas"]["TraceSummary"];
         };
+        /**
+         * TraceFacets
+         * @description Value counts per filter. Each facet's counts apply every other filter but not its own,
+         *     so ticking a value never hides its siblings. At most ``FACET_MAX_VALUES`` values per facet,
+         *     by count descending, then value.
+         */
+        TraceFacets: {
+            /** Client */
+            client: components["schemas"]["FacetValue"][];
+            /** Model */
+            model: components["schemas"]["FacetValue"][];
+            /** Name */
+            name: components["schemas"]["FacetValue"][];
+            /** Service */
+            service: components["schemas"]["FacetValue"][];
+            /** Source */
+            source: components["schemas"]["FacetValue"][];
+            /** Status */
+            status: components["schemas"]["FacetValue"][];
+        };
         /** TraceList */
         TraceList: {
             /**
+             * As Of
+             * Format: date-time
+             * @description Server time of this response; pass it as `since` on the next live poll.
+             */
+            as_of: string;
+            /**
              * Next Cursor
-             * @description Opaque cursor for the next page; null when there are no more traces.
+             * @description Opaque cursor for the next page; null when there are no more traces. Valid only with the same order and filters.
              */
             next_cursor: string | null;
             /** Traces */
@@ -191,6 +297,11 @@ export interface components {
             cost_usd: number;
             /** Duration Ms */
             duration_ms: number;
+            /**
+             * Input Preview
+             * @description The run's first user message (root span's input, else the earliest llm span's); null when capture is off.
+             */
+            input_preview: string | null;
             /** Input Tokens */
             input_tokens: number;
             /** Llm Calls */
@@ -199,6 +310,11 @@ export interface components {
             models: string[];
             /** Name */
             name: string;
+            /**
+             * Output Preview
+             * @description The run's final answer (root span's output, else the latest llm span's).
+             */
+            output_preview: string | null;
             /** Output Tokens */
             output_tokens: number;
             /** Service Name */
@@ -267,6 +383,26 @@ export interface operations {
             };
         };
     };
+    ingest_stats_v1_ingest_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestStats"];
+                };
+            };
+        };
+    };
     ingest_spans_v1_spans_post: {
         parameters: {
             query?: never;
@@ -289,6 +425,15 @@ export interface operations {
                     "application/json": components["schemas"]["IngestAccepted"];
                 };
             };
+            /** @description Body larger than the ingest limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -298,18 +443,10 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Ingest queue full; retry later. */
+            /** @description Ingest queue full; nothing from the batch was accepted. Retry after the `Retry-After` header (seconds). */
             429: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Not implemented until M1. */
-            501: {
-                headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -322,9 +459,24 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description `next_cursor` of the previous page. */
                 cursor?: string | null;
-                source?: ("sdk" | "gateway") | null;
-                status?: ("ok" | "error" | "blocked") | null;
+                order?: "desc" | "asc";
+                /** @description Live polling: only traces that gained spans after this time (the previous response's `as_of`). Includes a few seconds of overlap, so expect traces already seen and merge by `trace_id`. Not combinable with `cursor`. */
+                since?: string | null;
+                /** @description Traces starting at or after this time (inclusive). */
+                from?: string | null;
+                /** @description Traces starting before this time (exclusive). */
+                to?: string | null;
+                /** @description Trace name; repeat for OR. */
+                name?: string[] | null;
+                status?: ("ok" | "error" | "blocked")[] | null;
+                source?: ("sdk" | "gateway")[] | null;
+                client?: string[] | null;
+                /** @description Matches traces that used any of these models. */
+                model?: string[] | null;
+                /** @description `service.name`. */
+                service?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -350,11 +502,75 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Filter not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    trace_facets_v1_traces_facets_get: {
+        parameters: {
+            query?: {
+                /** @description Traces starting at or after this time (inclusive). */
+                from?: string | null;
+                /** @description Traces starting before this time (exclusive). */
+                to?: string | null;
+                /** @description Trace name; repeat for OR. */
+                name?: string[] | null;
+                status?: ("ok" | "error" | "blocked")[] | null;
+                source?: ("sdk" | "gateway")[] | null;
+                client?: string[] | null;
+                /** @description Matches traces that used any of these models. */
+                model?: string[] | null;
+                /** @description `service.name`. */
+                service?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceFacets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_trace_v1_traces__trace_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Live polling: only spans stored after this time (the previous response's `as_of`), with a few seconds of overlap; merge by `span_id`. The summary is always current. */
+                since?: string | null;
+            };
             header?: never;
             path: {
                 trace_id: string;

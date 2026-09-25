@@ -9,7 +9,7 @@ import pytest
 
 from lucentpad_server import sample
 from lucentpad_server.pricing import PRICES, cost_usd
-from lucentpad_server.schema import Attr, EventName, Span
+from lucentpad_server.schema import PREVIEW_MAX_CHARS, Attr, EventName, Span
 
 from .support import NOW
 
@@ -87,18 +87,18 @@ def test_features_present(spans: list[Span]) -> None:
     assert failovers
     for s, attrs in failovers:
         assert s.kind == "llm"
-        assert attrs[sample.FAILOVER_STATUS_CODE] == 429
-        assert s.attributes[Attr.GEN_AI_RESPONSE_MODEL] == attrs[sample.FAILOVER_TO_MODEL]
-        assert s.attributes[Attr.GEN_AI_REQUEST_MODEL] == attrs[sample.FAILOVER_FROM_MODEL]
+        assert attrs[Attr.FAILOVER_STATUS_CODE] == 429
+        assert s.attributes[Attr.GEN_AI_RESPONSE_MODEL] == attrs[Attr.FAILOVER_TO_MODEL]
+        assert s.attributes[Attr.GEN_AI_REQUEST_MODEL] == attrs[Attr.FAILOVER_FROM_MODEL]
 
     budgets = _events(spans, EventName.BUDGET_ALERT)
     assert budgets
     for _, attrs in budgets:
-        spent, limit = attrs[sample.BUDGET_SPENT_USD], attrs[sample.BUDGET_LIMIT_USD]
+        spent, limit = attrs[Attr.BUDGET_SPENT_USD], attrs[Attr.BUDGET_LIMIT_USD]
         assert isinstance(spent, float) and isinstance(limit, float) and spent > limit
 
     redactions = _events(spans, EventName.REDACTION)
-    assert any(a[sample.REDACTION_KIND] == "email" for _, a in redactions)
+    assert any(a[Attr.REDACTION_KIND] == "email" for _, a in redactions)
 
     assert any(s.status == "error" for s in spans)
 
@@ -141,3 +141,31 @@ def test_cli(tmp_path: Path) -> None:
     sample.main(["--out", str(out), "--now", NOW.isoformat()])
     data = json.loads(out.read_text())
     assert [Span.model_validate(s) for s in data["spans"]] == sample.generate(NOW)
+
+
+def test_previews(spans: list[Span]) -> None:
+    llm = [s for s in spans if s.kind == "llm"]
+    roots = [s for s in spans if s.parent_span_id is None]
+    assert all(Attr.INPUT_PREVIEW in s.attributes for s in llm + roots)
+    assert all(Attr.OUTPUT_PREVIEW in s.attributes for s in llm if s.status == "ok")
+    assert sum(Attr.OUTPUT_PREVIEW in s.attributes for s in roots) > 0.9 * len(roots)
+    for s in spans:
+        for key, flag in (
+            (Attr.INPUT_PREVIEW, Attr.INPUT_TRUNCATED),
+            (Attr.OUTPUT_PREVIEW, Attr.OUTPUT_TRUNCATED),
+        ):
+            text = s.attributes.get(key)
+            if text is None:
+                assert flag not in s.attributes
+                continue
+            assert isinstance(text, str) and 0 < len(text) <= PREVIEW_MAX_CHARS
+            if s.attributes.get(flag) is True:
+                assert len(text) == PREVIEW_MAX_CHARS
+            else:
+                assert flag not in s.attributes
+    truncated = [s for s in spans if s.attributes.get(Attr.INPUT_TRUNCATED)]
+    assert {s.kind for s in truncated} == {"llm"}
+    assert any(s.attributes.get(Attr.OUTPUT_TRUNCATED) for s in roots)  # long final answers
+    assert any(s.source == "sdk" for s in truncated) and any(
+        s.source == "gateway" for s in truncated
+    )

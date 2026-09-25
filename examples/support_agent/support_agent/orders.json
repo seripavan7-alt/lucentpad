@@ -1,0 +1,37 @@
+{
+  "1042": {
+    "order_id": "1042",
+    "status": "delivered",
+    "placed_at": "2026-09-12",
+    "delivered_at": "2026-09-18",
+    "customer": {"name": "Maya Patel", "email": "maya.patel@example.com"},
+    "items": [
+      {"sku": "LP-KETTLE-01", "name": "Gooseneck kettle", "qty": 1, "price_usd": 64.0},
+      {"sku": "LP-FILTER-100", "name": "Paper filters (100)", "qty": 2, "price_usd": 6.5}
+    ],
+    "total_usd": 77.0,
+    "notes": "Customer reported the kettle arrived with a cracked lid."
+  },
+  "1043": {
+    "order_id": "1043",
+    "status": "shipped",
+    "placed_at": "2026-09-20",
+    "delivered_at": null,
+    "customer": {"name": "Tom Okafor", "email": "tom.okafor@example.com"},
+    "items": [{"sku": "LP-GRINDER-02", "name": "Burr grinder", "qty": 1, "price_usd": 149.0}],
+    "total_usd": 149.0,
+    "notes": ""
+  },
+  "1057": {
+    "order_id": "1057",
+    "status": "delivered",
+    "placed_at": "2026-09-02",
+    "delivered_at": "2026-09-06",
+    "customer": {"name": "Ines Duarte", "email": "ines.duarte@example.com"},
+    "items": [
+      {"sku": "LP-ESPRESSO-09", "name": "Espresso machine", "qty": 1, "price_usd": 489.0}
+    ],
+    "total_usd": 489.0,
+    "notes": "Over the refund limit: used by the guardrail demo step (M3)."
+  }
+}

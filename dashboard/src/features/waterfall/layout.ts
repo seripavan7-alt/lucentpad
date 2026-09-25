@@ -40,8 +40,20 @@ export interface LayoutOptions {
 
 const ms = (iso: string): number => Date.parse(iso);
 
+/** Sub-millisecond part of an ISO timestamp (the API sends microseconds; Date.parse drops them). */
+function subMs(iso: string): number {
+  const frac = /\.(\d+)/.exec(iso)?.[1] ?? "";
+  return frac.length > 3 ? Number(`0.${frac.slice(3)}`) : 0;
+}
+
+/** Siblings by start time at full (microsecond) precision: fast tool calls often start within
+ * the same millisecond, and their order must still match the order they ran in. */
 function compareSpans(a: Span, b: Span): number {
-  return ms(a.start_time) - ms(b.start_time) || a.span_id.localeCompare(b.span_id);
+  return (
+    ms(a.start_time) - ms(b.start_time) ||
+    subMs(a.start_time) - subMs(b.start_time) ||
+    a.span_id.localeCompare(b.span_id)
+  );
 }
 
 const clampPct = (v: number): number => Math.min(100, Math.max(0, v));

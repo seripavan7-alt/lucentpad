@@ -1,73 +1,48 @@
-import { Link, useNavigate, useSearchParams } from "react-router";
-import { useTraces, type TraceFilters } from "../api/queries";
-import {
-  SPAN_SOURCES,
-  SPAN_STATUSES,
-  type SpanSource,
-  type SpanStatus,
-  type TraceSummary,
-} from "../api/types";
+import { useId, useState } from "react";
+import { useLiveTraces, useTraceFacets, useTraces } from "../api/queries";
+import { FilterIcon, RefreshIcon } from "../components/icons";
 import { PageHeader } from "../components/PageHeader";
 import { SegmentedControl, type SegmentOption } from "../components/SegmentedControl";
 import { Button, EmptyState, ErrorState } from "../components/States";
-import { StatusBadge } from "../components/StatusBadge";
+import { FilterPanel } from "../features/traces/FilterPanel";
+import { TracesTable } from "../features/traces/TracesTable";
 import {
-  traceOrigin,
-  formatCost,
-  formatDateTime,
-  formatDuration,
-  formatRelative,
-  formatTokens,
-} from "../lib/format";
-import { useNow } from "../lib/useNow";
+  activeFilterCount,
+  NO_FILTERS,
+  RANGES,
+  rangeInfo,
+  rangePhrase,
+  useTracesView,
+  type RangeId,
+} from "../features/traces/view";
 import styles from "./TracesPage.module.css";
 
-type All = "all";
+const RANGE_OPTIONS: SegmentOption<RangeId>[] = RANGES.map((r) => ({ value: r.id, label: r.id }));
 
-const SOURCE_OPTIONS: SegmentOption<SpanSource | All>[] = [
-  { value: "all", label: "All" },
-  { value: "sdk", label: "SDK" },
-  { value: "gateway", label: "Gateway" },
-];
-
-const STATUS_OPTIONS: SegmentOption<SpanStatus | All>[] = [
-  { value: "all", label: "All" },
-  { value: "ok", label: "OK" },
-  { value: "error", label: "Error" },
-  { value: "blocked", label: "Blocked" },
-];
-
-function pick<T extends string>(allowed: readonly T[], value: string | null): T | undefined {
-  return (allowed as readonly (string | null)[]).includes(value) ? (value as T) : undefined;
-}
-
-type FilterPatch = Partial<Record<keyof TraceFilters, string>>;
-
-/** Filters live in the URL (?source=&status=) so views are linkable; "all" clears one. */
-function useTraceFilters(): [TraceFilters, (patch: FilterPatch) => void] {
-  const [params, setParams] = useSearchParams();
-  const filters: TraceFilters = {
-    source: pick(SPAN_SOURCES, params.get("source")),
-    status: pick(SPAN_STATUSES, params.get("status")),
-  };
-  const setFilter = (patch: FilterPatch) => {
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === "all") next.delete(key);
-        else next.set(key, value);
-      }
-      return next;
-    });
-  };
-  return [filters, setFilter];
+/** The next wider preset the empty state offers: 24 hours, or 30 days from 24h and up. */
+function widerRange(range: RangeId): RangeId | null {
+  const ms = rangeInfo(range).ms;
+  if (ms < rangeInfo("24h").ms) return "24h";
+  if (ms < rangeInfo("30d").ms) return "30d";
+  return null;
 }
 
 export function TracesPage() {
-  const [filters, setFilter] = useTraceFilters();
-  const query = useTraces(filters);
+  const [view, update] = useTracesView();
+  const query = useTraces(view);
+  const facets = useTraceFacets(view);
+  const fresh = useLiveTraces(view, query.isSuccess);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const panelId = useId();
+
   const traces = query.data?.pages.flatMap((page) => page.traces) ?? [];
-  const filtered = filters.source !== undefined || filters.status !== undefined;
+  const active = activeFilterCount(view.filters);
+  const wider = widerRange(view.range);
+
+  const refresh = () => {
+    void query.refetch();
+    void facets.refetch();
+  };
 
   return (
     <>
@@ -75,176 +50,135 @@ export function TracesPage() {
         title="Traces"
         actions={
           <>
+            <button
+              type="button"
+              className={styles.filtersButton}
+              aria-expanded={panelOpen}
+              aria-controls={panelId}
+              onClick={() => {
+                setPanelOpen((v) => !v);
+              }}
+            >
+              <FilterIcon width={14} height={14} />
+              Filters
+              {active > 0 && <span className={styles.filtersCount}>{active}</span>}
+            </button>
             <SegmentedControl
-              label="Source"
-              options={SOURCE_OPTIONS}
-              value={filters.source ?? "all"}
-              onChange={(v) => {
-                setFilter({ source: v });
+              label="Time range"
+              options={RANGE_OPTIONS}
+              value={view.range}
+              onChange={(range) => {
+                update({ range });
               }}
             />
-            <SegmentedControl
-              label="Status"
-              options={STATUS_OPTIONS}
-              value={filters.status ?? "all"}
-              onChange={(v) => {
-                setFilter({ status: v });
-              }}
-            />
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Refresh"
+              title="Refresh"
+              onClick={refresh}
+              data-spinning={query.isRefetching && !query.isFetchingNextPage ? "true" : undefined}
+            >
+              <RefreshIcon width={14} height={14} />
+            </button>
           </>
         }
       />
-      <div className={styles.body}>
-        {query.isPending ? (
-          <TableSkeleton />
-        ) : query.data === undefined ? (
-          <ErrorState
-            title="Couldn't load traces"
-            action={
-              <Button
-                onClick={() => {
-                  void query.refetch();
-                }}
-              >
-                Retry
-              </Button>
-            }
-          >
-            {query.error.message}
-          </ErrorState>
-        ) : traces.length === 0 ? (
-          filtered ? (
-            <EmptyState
-              title="No traces match these filters"
+      <div className={styles.layout}>
+        <FilterPanel
+          id={panelId}
+          open={panelOpen}
+          facets={facets.data}
+          loading={facets.isPending}
+          error={facets.isError}
+          filters={view.filters}
+          onChange={(filters) => {
+            update({ filters });
+          }}
+        />
+        <div className={styles.body}>
+          {query.isPending ? (
+            <TableSkeleton />
+          ) : query.data === undefined ? (
+            <ErrorState
+              title="Couldn't load traces"
               action={
                 <Button
                   onClick={() => {
-                    setFilter({ source: "all", status: "all" });
+                    void query.refetch();
                   }}
                 >
-                  Clear filters
+                  Retry
                 </Button>
               }
-            />
-          ) : (
-            <EmptyState title="No traces yet">
-              Run an agent with the LucentPad SDK or point a coding assistant at the gateway, and
-              its traces will show up here.
+            >
+              {query.error.message}
+            </ErrorState>
+          ) : traces.length === 0 ? (
+            <EmptyState
+              title={
+                active > 0
+                  ? `No traces match these filters in ${rangePhrase(view.range)}`
+                  : `No traces in ${rangePhrase(view.range)}`
+              }
+              action={
+                <span className={styles.emptyActions}>
+                  {wider && (
+                    <Button
+                      onClick={() => {
+                        update({ range: wider });
+                      }}
+                    >
+                      Show last {rangeInfo(wider).phrase}
+                    </Button>
+                  )}
+                  {active > 0 && (
+                    <Button
+                      onClick={() => {
+                        update({ filters: NO_FILTERS });
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                </span>
+              }
+            >
+              {active === 0 &&
+                "Run an agent with the LucentPad SDK or point a coding assistant at the gateway, and its traces will show up here."}
             </EmptyState>
-          )
-        ) : (
-          <>
-            <TracesTable traces={traces} />
-            {query.isFetchNextPageError && (
-              <p className={styles.pageError} role="alert">
-                Couldn&apos;t load more traces: {query.error.message}
-              </p>
-            )}
-            {query.hasNextPage && (
-              <div className={styles.more}>
-                <Button
-                  onClick={() => {
-                    void query.fetchNextPage();
-                  }}
-                  disabled={query.isFetchingNextPage}
-                >
-                  {query.isFetchingNextPage ? "Loading…" : "Load more"}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
+          ) : (
+            <>
+              <TracesTable
+                traces={traces}
+                order={view.order}
+                fresh={fresh}
+                onToggleOrder={() => {
+                  update({ order: view.order === "desc" ? "asc" : "desc" });
+                }}
+              />
+              {query.isFetchNextPageError && (
+                <p className={styles.pageError} role="alert">
+                  Couldn&apos;t load more traces: {query.error.message}
+                </p>
+              )}
+              {query.hasNextPage && (
+                <div className={styles.more}>
+                  <Button
+                    onClick={() => {
+                      void query.fetchNextPage();
+                    }}
+                    disabled={query.isFetchingNextPage}
+                  >
+                    {query.isFetchingNextPage ? "Loading…" : "Load more"}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </>
-  );
-}
-
-function TracesTable({ traces }: { traces: TraceSummary[] }) {
-  const navigate = useNavigate();
-  const now = useNow();
-  return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Source</th>
-            <th scope="col">Status</th>
-            <th scope="col">Started</th>
-            <th scope="col" className={styles.right}>
-              Duration
-            </th>
-            <th scope="col" className={styles.right}>
-              LLM calls
-            </th>
-            <th scope="col" className={styles.right}>
-              Tokens in / out
-            </th>
-            <th scope="col" className={styles.right}>
-              Cost
-            </th>
-            <th scope="col">Models</th>
-          </tr>
-        </thead>
-        <tbody>
-          {traces.map((t) => {
-            const href = `/traces/${t.trace_id}`;
-            return (
-              <tr
-                key={t.trace_id}
-                className={styles.row}
-                onClick={(e) => {
-                  if (e.target instanceof Element && e.target.closest("a")) return;
-                  void navigate(href);
-                }}
-              >
-                <td className={styles.nameCell}>
-                  <Link to={href} className={styles.name}>
-                    {t.name}
-                  </Link>
-                </td>
-                <td>
-                  <span className={styles.source}>
-                    <span className={styles.sourceKind}>
-                      {t.source === "sdk" ? "SDK" : "Gateway"}
-                    </span>
-                    {traceOrigin(t) && <span className="muted">{traceOrigin(t)}</span>}
-                  </span>
-                </td>
-                <td>
-                  <StatusBadge status={t.status} />
-                </td>
-                <td className="muted num" title={formatDateTime(t.start_time)}>
-                  <time dateTime={t.start_time}>{formatRelative(t.start_time, now)}</time>
-                </td>
-                <td className={`${styles.right} num`}>{formatDuration(t.duration_ms)}</td>
-                <td className={`${styles.right} num`}>{t.llm_calls}</td>
-                <td className={`${styles.right} num`}>
-                  {formatTokens(t.input_tokens)}
-                  <span className={styles.sep}> / </span>
-                  {formatTokens(t.output_tokens)}
-                </td>
-                <td className={`${styles.right} num`}>{formatCost(t.cost_usd)}</td>
-                <td>
-                  <Models models={t.models} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Models({ models }: { models: string[] }) {
-  const [first, ...rest] = models;
-  if (first === undefined) return <span className="muted">–</span>;
-  return (
-    <span className={styles.models} title={models.join(", ")}>
-      <span className="mono">{first}</span>
-      {rest.length > 0 && <span className={styles.moreModels}>+{rest.length}</span>}
-    </span>
   );
 }
 

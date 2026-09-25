@@ -83,3 +83,40 @@ export const CloseIcon = (p: IconProps) => (
     <path d="m4 4 8 8M12 4l-8 8" />
   </Icon>
 );
+
+export const RefreshIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13 8a5 5 0 1 1-1.46-3.54M13 2.5v3h-3" />
+  </Icon>
+);
+
+export const FilterIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 4h11M4.5 8h7M6.5 12h3" />
+  </Icon>
+);
+
+export const ArrowDownIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 3v10M4.5 9.5 8 13l3.5-3.5" />
+  </Icon>
+);
+
+export const ArrowUpIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 13V3M4.5 6.5 8 3l3.5 3.5" />
+  </Icon>
+);
+
+export const ChevronDownIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m4 6 4 4 4-4" />
+  </Icon>
+);
+
+export const CopyIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+  </Icon>
+);

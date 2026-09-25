@@ -94,3 +94,34 @@ describe("timeTicks", () => {
     expect(timeTicks(0)).toEqual([{ ms: 0, pct: 0 }]);
   });
 });
+
+describe("sibling order", () => {
+  it("orders spans that start in the same millisecond by their microseconds", () => {
+    const base = { trace_id: "t".repeat(32), source: "sdk" as const, status: "ok" as const };
+    const root = {
+      ...base,
+      span_id: "f000000000000000",
+      parent_span_id: null,
+      name: "root",
+      kind: "agent" as const,
+      start_time: "2026-09-25T18:21:07.000000Z",
+      end_time: "2026-09-25T18:21:11.000000Z",
+    };
+    const child = (span_id: string, name: string, start: string) => ({
+      ...base,
+      span_id,
+      parent_span_id: root.span_id,
+      name,
+      kind: "tool" as const,
+      start_time: start,
+      end_time: "2026-09-25T18:21:10.200000Z",
+    });
+    const rows = buildWaterfall([
+      root,
+      child("c000000000000000", "third", "2026-09-25T18:21:10.133568Z"),
+      child("a000000000000000", "second", "2026-09-25T18:21:10.133550Z"),
+      child("b000000000000000", "first", "2026-09-25T18:21:10.133525Z"),
+    ]).rows.map((r) => r.span.name);
+    expect(rows).toEqual(["root", "first", "second", "third"]);
+  });
+});

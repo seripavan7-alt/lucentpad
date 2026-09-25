@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
-import { useTrace } from "../api/queries";
+import { useLiveTrace, useTrace } from "../api/queries";
 import type { TraceSummary } from "../api/types";
 import { ChevronLeftIcon } from "../components/icons";
 import { PageHeader } from "../components/PageHeader";
@@ -23,11 +23,14 @@ import styles from "./TraceDetailPage.module.css";
 export function TraceDetailPage() {
   const { traceId = "" } = useParams();
   const query = useTrace(traceId);
+  const { live, now } = useLiveTrace(traceId);
+  // While live the time axis runs up to now, so it grows smoothly as spans stream in.
+  const until = live ? now : undefined;
   const [params, setParams] = useSearchParams();
   const selectedSpanId = params.get("span");
 
   const spans = query.data?.spans;
-  const layout = useMemo(() => buildWaterfall(spans ?? []), [spans]);
+  const layout = useMemo(() => buildWaterfall(spans ?? [], { until }), [spans, until]);
   const selectedRow = layout.rows.find((r) => r.span.span_id === selectedSpanId);
 
   const selectSpan = (spanId: string | null) => {
@@ -105,12 +108,19 @@ export function TraceDetailPage() {
         }
       >
         <StatusBadge status={trace.status} />
+        {live && (
+          <span className={styles.live} role="status">
+            <span className={styles.liveDot} aria-hidden="true" />
+            Live
+          </span>
+        )}
       </PageHeader>
       <TraceStats trace={trace} />
       <div className={styles.content} data-inspector={selectedRow ? "open" : "closed"}>
         <section className={styles.waterfall} aria-label="Waterfall">
           <Waterfall
             spans={query.data.spans}
+            until={until}
             selectedSpanId={selectedSpanId}
             onSelect={(id) => {
               selectSpan(id);

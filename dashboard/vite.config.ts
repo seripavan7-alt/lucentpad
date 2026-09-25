@@ -25,8 +25,9 @@ const apiTarget = process.env.LUCENTPAD_API_URL ?? "http://localhost:8000";
 // `vite build --mode site`: landing site + static demo for GitHub Pages, served under /lucentpad/.
 export default defineConfig(({ mode }) => ({
   base: mode === "site" ? (process.env.LUCENTPAD_SITE_BASE ?? "/lucentpad/") : "/",
-  // The demo snapshot is one ~1 MB data chunk (≈100 kB gzipped), loaded only by /demo.
-  build: mode === "site" ? { outDir: "dist-site", chunkSizeWarningLimit: 1200 } : {},
+  // The demo snapshot is one ~1.6 MB data chunk (≈150 kB gzipped, previews included), loaded
+  // only by /demo.
+  build: mode === "site" ? { outDir: "dist-site", chunkSizeWarningLimit: 2000 } : {},
   plugins: [react(), ...(mode === "site" ? [spaFallback()] : [])],
   server: {
     port: 5173,
@@ -45,5 +46,7 @@ export default defineConfig(({ mode }) => ({
     setupFiles: ["./src/test/setup.ts"],
     css: false,
     restoreMocks: true,
+    // Absolute timestamps are local time; pin the zone so assertions are stable.
+    env: { TZ: "UTC" },
   },
 }));

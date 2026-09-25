@@ -4,7 +4,7 @@
 
     python -m lucentpad_server.sample --out spans.json [--now 2026-09-25T12:00:00Z] [--seed 42]
 
-Model names and costs come from ``pricing.py``, whose prices are illustrative placeholders.
+Model names and costs come from ``pricing.py`` (list prices checked 2026-09-25).
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from typing import Any
 
 from lucentpad_server.pricing import cost_usd
 from lucentpad_server.schema import (
+    PREVIEW_MAX_CHARS,
     Attr,
     Attributes,
     EventName,
@@ -28,17 +29,6 @@ from lucentpad_server.schema import (
     SpanSource,
     SpanStatus,
 )
-
-# Event attribute keys used by the sample data (not part of the frozen API contract).
-FAILOVER_FROM_MODEL = "lucentpad.failover.from_model"
-FAILOVER_TO_MODEL = "lucentpad.failover.to_model"
-FAILOVER_STATUS_CODE = "lucentpad.failover.status_code"
-FAILOVER_RETRIES = "lucentpad.failover.retries"
-BUDGET_LIMIT_USD = "lucentpad.budget.limit_usd"
-BUDGET_SPENT_USD = "lucentpad.budget.spent_usd"
-REDACTION_KIND = "lucentpad.redaction.kind"
-REDACTION_COUNT = "lucentpad.redaction.count"
-INPUT_PREVIEW = "lucentpad.input.preview"
 
 SUPPORT_SERVICE = "support-agent"
 GATEWAY_SERVICE = "lucentpad-gateway"
@@ -83,6 +73,87 @@ _CODING_PROMPTS = [
     "Fix the failing CI job.",
     "Summarise the diff on this branch.",
 ]
+
+
+_TOOL_ACTIONS = [
+    "read store.py",
+    "run the failing test",
+    "search the repo for insert_spans",
+    "open the CI log",
+    "check git diff",
+    "read migrations/0001_init.sql",
+]
+_FOLLOW_UPS = [
+    "tool_result: 3 passed, 1 failed (test_writer_drains_on_shutdown)",
+    "tool_result: exit code 0",
+    "Looks good, can you also update the docstring?",
+    "tool_result: store.py (382 lines)",
+    "That didn't work, same error.",
+    "tool_result: ruff: 2 errors fixed, 0 remaining",
+    "Ok, go ahead.",
+]
+_ANSWERS = [
+    "The test is flaky because the writer task races the shutdown drain; awaiting the task "
+    "before closing the pool fixes it.",
+    "Done. The batch writer now uses COPY into a staging table, then one INSERT ... SELECT.",
+    "The regex matches 32 lowercase hex characters, i.e. a W3C trace id.",
+    "Added type hints; mypy --strict passes.",
+    "The migration adds traces_time_idx on (start_time DESC, trace_id DESC).",
+    "CI failed on a stale generated file; I regenerated it and the job is green.",
+    "This branch adds facets, a time window on the traces list and a GIN index on models.",
+]
+_CODE_LINES = [
+    "async def insert_spans(self, spans: Iterable[Span]) -> int:",
+    "    records = [_record(s) for s in spans]",
+    "    if not records:",
+    "        return 0",
+    "    async with self._pool.acquire() as conn, conn.transaction():",
+    "        await conn.execute(_CREATE_STAGE)",
+    '        await conn.copy_records_to_table("spans_stage", records=records)',
+    "        inserted = await conn.fetchval(_MERGE_STAGE)",
+    "    return int(inserted)",
+    "",
+    "def _cursor(row: asyncpg.Record) -> Cursor:",
+    '    return Cursor(row["start_time"], row["trace_id"])',
+]
+_HISTORY_LINES = [
+    "customer: I have been waiting for two weeks and nobody answers my emails.",
+    "agent: I'm sorry about the wait. Let me check the order details for you.",
+    "customer: The box was crushed and the lid of the kettle is cracked.",
+    "agent: Thanks for the photos. I can see the damage clearly.",
+    "customer: I also want to know why I was charged for express shipping.",
+    "agent: Express shipping was selected at checkout; I can refund the difference.",
+    "customer: Can you send the replacement to my office address instead?",
+    "agent: Of course. Please confirm the address and I'll update the order.",
+]
+
+
+def _previews(inp: str | None = None, out: str | None = None) -> Attributes:
+    """Input/output preview attributes, cut at PREVIEW_MAX_CHARS and flagged like the SDK."""
+    attrs: Attributes = {}
+    for text, key, flag in (
+        (inp, Attr.INPUT_PREVIEW, Attr.INPUT_TRUNCATED),
+        (out, Attr.OUTPUT_PREVIEW, Attr.OUTPUT_TRUNCATED),
+    ):
+        if text is None:
+            continue
+        attrs[key] = text[:PREVIEW_MAX_CHARS]
+        if len(text) > PREVIEW_MAX_CHARS:
+            attrs[flag] = True
+    return attrs
+
+
+def _text_rng(trace_id: str) -> random.Random:
+    """Per-trace RNG for preview text, so text never perturbs the main sample stream."""
+    return random.Random(int(trace_id, 16))  # noqa: S311 - sample data
+
+
+def _long_text(trng: random.Random, header: str, lines: list[str]) -> str:
+    """A text just over the preview limit (it gets truncated)."""
+    out = [header]
+    while sum(len(line) + 1 for line in out) <= PREVIEW_MAX_CHARS + 300:
+        out.append(trng.choice(lines))
+    return "\n".join(out)
 
 
 @dataclass
@@ -187,6 +258,7 @@ def _pick_start(rng: random.Random, now: datetime) -> datetime:
 
 def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -> list[Span]:
     b = _Builder(ids, ids.trace(), "sdk")
+    trng = _text_rng(b.trace_id)
     root_id = ids.span()
     order = rng.randint(1000, 1999)
     session = f"sess_{rng.getrandbits(40):010x}"
@@ -206,7 +278,22 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
     root_status: SpanStatus = "ok"
     root_message: str | None = None
 
-    def llm(out_range: tuple[int, int], finish: str, *, final: bool = False) -> None:
+    shipped = trng.choice(["delivered", "in transit", "processing"])
+    total = trng.choice([19, 24, 35, 49, 59, 89, 120, 149, 180, 250, 480])
+    lookup_result = (
+        f'lookup_order result: {{"order": {order}, "status": "{shipped}", '
+        f'"total": {total}.00, "items": {trng.randint(1, 4)}}}'
+    )
+    eligible = f"Order {order} qualifies for a refund. Issuing it now."
+
+    def llm(
+        out_range: tuple[int, int],
+        finish: str,
+        *,
+        final: bool = False,
+        prompt: str,
+        answer: str | None,
+    ) -> None:
         nonlocal t, context, spent, llm_index, root_status, root_message
         llm_index += 1
         in_tok = context
@@ -217,8 +304,6 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
         status: SpanStatus = "ok"
         message: str | None = None
         attrs_extra: Attributes = {}
-        if llm_index == 1:
-            attrs_extra[INPUT_PREVIEW] = question
         if variant == "failover" and llm_index == 2:
             failed_ms = rng.uniform(150, 400)
             retry_ms = rng.uniform(600, 1200)
@@ -227,10 +312,10 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                     name=EventName.FAILOVER,
                     time=t + _ms(failed_ms + retry_ms),
                     attributes={
-                        FAILOVER_FROM_MODEL: SUPPORT_MODEL,
-                        FAILOVER_TO_MODEL: SUPPORT_FALLBACK,
-                        FAILOVER_STATUS_CODE: 429,
-                        FAILOVER_RETRIES: 1,
+                        Attr.FAILOVER_FROM_MODEL: SUPPORT_MODEL,
+                        Attr.FAILOVER_TO_MODEL: SUPPORT_FALLBACK,
+                        Attr.FAILOVER_STATUS_CODE: 429,
+                        Attr.FAILOVER_RETRIES: 1,
                     },
                 )
             )
@@ -242,6 +327,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
             latency = rng.uniform(2500, 6000)
             finish = "error"
             root_status, root_message = "error", "model call failed"
+        attrs_extra.update(_previews(prompt, None if status == "error" else answer))
         end = t + _ms(latency)
         attrs = _llm_attrs(
             system="anthropic",
@@ -262,7 +348,10 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                 SpanEvent(
                     name=EventName.BUDGET_ALERT,
                     time=end,
-                    attributes={BUDGET_LIMIT_USD: budget_limit, BUDGET_SPENT_USD: round(spent, 6)},
+                    attributes={
+                        Attr.BUDGET_LIMIT_USD: budget_limit,
+                        Attr.BUDGET_SPENT_USD: round(spent, 6),
+                    },
                 )
             )
         if llm_index == 1 and redacted:
@@ -270,7 +359,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                 SpanEvent(
                     name=EventName.REDACTION,
                     time=t,
-                    attributes={REDACTION_KIND: "email", REDACTION_COUNT: 1},
+                    attributes={Attr.REDACTION_KIND: "email", Attr.REDACTION_COUNT: 1},
                 )
             )
         b.add(
@@ -318,19 +407,35 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
         # Long conversations: the per-run limit (set before the last call) is crossed by it.
         context = rng.randint(9000, 14000)
 
-    llm((60, 140), "tool_use")
+    final_answer: str | None = None
+    llm((60, 140), "tool_use", prompt=question, answer=f"Let me look up order {order}.")
     if variant == "not_found":
         tool("lookup_order", (15, 60), 40, status="error", message=f"order {order} not found")
-        llm((80, 180), "end_turn", final=True)
+        final_answer = (
+            f"I couldn't find order {order}. Could you double-check the number in your "
+            "confirmation email?"
+        )
+        llm(
+            (80, 180),
+            "end_turn",
+            final=True,
+            prompt=f"lookup_order error: order {order} not found",
+            answer=final_answer,
+        )
     elif variant == "llm_error":
         tool("lookup_order", (15, 60), rng.randint(180, 320))
-        llm((0, 0), "error", final=True)
+        llm((0, 0), "error", final=True, prompt=lookup_result, answer=None)
     else:
         tool("lookup_order", (15, 60), rng.randint(180, 320))
         if variant == "status":
-            llm((90, 220), "end_turn", final=True)
+            final_answer = {
+                "delivered": f"Order {order} was delivered yesterday; it was left at the door.",
+                "in transit": f"Order {order} is in transit and should arrive within 2 days.",
+                "processing": f"Order {order} is being packed and ships tomorrow.",
+            }[shipped]
+            llm((90, 220), "end_turn", final=True, prompt=lookup_result, answer=final_answer)
         elif variant == "guardrail":
-            llm((60, 120), "tool_use")
+            llm((60, 120), "tool_use", prompt=lookup_result, answer=eligible)
             amount = rng.choice([250, 320, 480, 750, 1200])
             g_start = t
             g_end = t + _ms(rng.uniform(1, 4))
@@ -341,7 +446,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                 start=g_start,
                 end=g_end,
                 parent=root_id,
-                attributes={**common, Attr.GUARDRAIL_RULE: rule, "lucentpad.refund.amount": amount},
+                attributes={**common, Attr.GUARDRAIL_RULE: rule, Attr.REFUND_AMOUNT: amount},
                 status="blocked",
                 status_message=f"refund of ${amount} exceeds the ${REFUND_LIMIT_USD} limit",
                 events=[
@@ -354,16 +459,36 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
             )
             t = g_end + _ms(rng.uniform(1, 5))
             context += 60
-            llm((120, 260), "end_turn", final=True)
+            final_answer = (
+                f"I can't approve a ${amount} refund automatically (the limit is "
+                f"${REFUND_LIMIT_USD}), so I've passed order {order} to a colleague who will "
+                "reply within one business day."
+            )
+            llm(
+                (120, 260),
+                "end_turn",
+                final=True,
+                prompt=f"issue_refund blocked by guardrail {rule}: ${amount} exceeds the limit",
+                answer=final_answer,
+            )
         else:
-            llm((60, 120), "tool_use")
+            llm((60, 120), "tool_use", prompt=lookup_result, answer=eligible)
             amount = rng.choice([19, 24, 35, 49, 59, 89, 120, 149, 180])
-            tool("issue_refund", (40, 160), 60, extra={"lucentpad.refund.amount": amount})
+            tool("issue_refund", (40, 160), 60, extra={Attr.REFUND_AMOUNT: amount})
             tool("draft_email", (8, 30), rng.randint(150, 260))
             if variant == "budget":
                 prices = cost_usd(SUPPORT_MODEL, context, 250) or 0.0
                 budget_limit = round(spent + prices * 0.5, 4)
-            llm((150, 400), "end_turn", final=True)
+            final_answer = (
+                f"Hi! I'm sorry about order {order}. I've issued a refund of ${amount}; it "
+                "will show on your card in 3-5 business days. A confirmation email is on its way."
+            )
+            prompt = (
+                _long_text(trng, f"Conversation so far (order {order}):", _HISTORY_LINES)
+                if variant == "budget"
+                else f"draft_email result: confirmation for a ${amount} refund drafted"
+            )
+            llm((150, 400), "end_turn", final=True, prompt=prompt, answer=final_answer)
 
     b.add(
         name="support-agent.run",
@@ -371,7 +496,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
         start=start,
         end=t,
         parent=None,
-        attributes={**common, Attr.SESSION_ID: session},
+        attributes={**common, Attr.SESSION_ID: session, **_previews(question, final_answer)},
         status=root_status,
         status_message=root_message,
         span_id=root_id,
@@ -384,6 +509,7 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
 
 def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str) -> list[Span]:
     b = _Builder(ids, ids.trace(), "gateway")
+    trng = _text_rng(b.trace_id)
     root_id = ids.span()
     session = f"{client}-{rng.getrandbits(48):012x}"
     if client == "claude-code":
@@ -406,6 +532,8 @@ def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str
 
     t = start
     root_status: SpanStatus = "ok"
+    first_prompt: str | None = None
+    last_answer: str | None = None
     for turn in range(turns):
         if turn:
             t += timedelta(seconds=rng.uniform(4, 150))  # user think time / tool execution
@@ -442,8 +570,30 @@ def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str
             streaming=True,
         )
         attrs[Attr.SESSION_ID] = session
+        prompt: str
         if turn == 0:
-            attrs[INPUT_PREVIEW] = rng.choice(_CODING_PROMPTS)
+            prompt = first_prompt = rng.choice(_CODING_PROMPTS)
+        elif client == "claude-code" and trng.random() < 0.2:
+            prompt = _long_text(
+                trng, "tool_result: cat server/lucentpad_server/store.py", _CODE_LINES
+            )
+        else:
+            prompt = trng.choice(_FOLLOW_UPS)
+        answer: str
+        if side:
+            prompt = "Summarise this conversation as a title of at most 6 words."
+            answer = trng.choice(["Fix flaky writer test", "Add COPY batch insert", "CI fix"])
+        elif finish in ("tool_use", "tool_calls"):
+            answer = f"I'll {trng.choice(_TOOL_ACTIONS)}."
+        elif trng.random() < 0.15:
+            answer = _long_text(trng, "Here is the updated function:", _CODE_LINES)
+        else:
+            answer = trng.choice(_ANSWERS)
+        if status == "error":
+            answer = answer[: max(1, len(answer) // 3)]
+        attrs.update(_previews(prompt, answer))
+        if not side:
+            last_answer = answer
         end = t + _ms(latency)
         op = "messages" if system == "anthropic" else "chat.completions"
         b.add(
@@ -466,7 +616,7 @@ def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str
         start=start,
         end=t,
         parent=None,
-        attributes={**common, Attr.STREAMING: True},
+        attributes={**common, Attr.STREAMING: True, **_previews(first_prompt, last_answer)},
         status=root_status,
         span_id=root_id,
     )

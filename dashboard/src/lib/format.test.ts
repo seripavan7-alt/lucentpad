@@ -82,3 +82,20 @@ describe("traceOrigin", () => {
     expect(traceOrigin({ source: "sdk", client: null, service_name: null })).toBeNull();
   });
 });
+
+describe("timestamps and previews", () => {
+  it("formats absolute local time on a 24-hour clock (TZ=UTC in tests)", async () => {
+    const { formatDateTime, formatIsoUtc } = await import("./format");
+    expect(formatDateTime("2026-09-24T23:02:14.500Z")).toBe("Sep 24, 23:02:14");
+    expect(formatDateTime("2026-09-25T00:05:00Z")).toBe("Sep 25, 00:05:00");
+    expect(formatIsoUtc("2026-09-24T23:02:14.500Z")).toBe("2026-09-24T23:02:14Z");
+  });
+
+  it("builds a one-line preview, or null when nothing was captured", async () => {
+    const { previewLine } = await import("./format");
+    expect(previewLine("Where is\n my order?", "Shipped.")).toBe("Where is my order? → Shipped.");
+    expect(previewLine("Hi", null)).toBe("Hi → –");
+    expect(previewLine(null, undefined)).toBeNull();
+    expect(previewLine("", "  ")).toBeNull();
+  });
+});

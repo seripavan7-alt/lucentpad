@@ -177,7 +177,9 @@ async def test_lifespan_without_seed(db_url: str, monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("LUCENTPAD_SEED_SAMPLE", raising=False)
     async with app_client(create_app()) as c:
         r = await c.get("/v1/traces")
-    assert r.json() == {"traces": [], "next_cursor": None}
+    body = r.json()
+    assert (body["traces"], body["next_cursor"]) == ([], None)
+    assert "as_of" in body
 
 
 async def test_lifespan_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo demo-snapshot site
+.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo demo-snapshot site agent
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -21,7 +21,7 @@ check: check-contract check-py check-web ## Everything CI runs
 check-py: ## Lint, typecheck and test the Python code
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run mypy server
+	uv run mypy server sdk examples/support_agent
 	uv run pytest
 
 check-web: ## Lint, typecheck, test and build the dashboard
@@ -38,6 +38,9 @@ check-contract: ## Fail if contracts/ or generated dashboard types are stale
 contract: ## Regenerate contracts/openapi.json and dashboard API types
 	uv run python -m lucentpad_server.export_openapi contracts/openapi.json
 	cd dashboard && npm run gen:api
+
+agent: ## Run the demo agent: make agent Q="Where's order 1042? I want a refund." [ARGS=--mock-llm]
+	uv run python -m support_agent "$(Q)" $(ARGS)
 
 demo-snapshot: ## Regenerate the static demo's data (dashboard/src/demo/*.json) from the real API
 	LUCENTPAD_UPDATE_DEMO=1 uv run pytest server/tests/test_demo_snapshot.py -q

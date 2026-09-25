@@ -1,4 +1,11 @@
-import type { ListTracesParams, TraceDetail, TraceList } from "./types";
+import type {
+  GetTraceParams,
+  ListTracesParams,
+  TraceDetail,
+  TraceFacets,
+  TraceFacetsParams,
+  TraceList,
+} from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -10,7 +17,7 @@ export class ApiError extends Error {
   }
 }
 
-type QueryValue = string | number | null | undefined;
+type QueryValue = string | number | readonly string[] | null | undefined;
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -24,7 +31,12 @@ export function setFetcher(next: Fetcher): void {
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== null && value !== undefined && value !== "") params.set(key, String(value));
+    if (Array.isArray(value)) {
+      // Repeated params: ?status=error&status=blocked
+      for (const item of value as readonly string[]) params.append(key, item);
+    } else if (value !== null && value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
   }
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
@@ -61,8 +73,22 @@ export function listTraces(
   return getJson<TraceList>(buildUrl("/v1/traces", params), signal);
 }
 
-export function getTrace(traceId: string, signal?: AbortSignal): Promise<TraceDetail> {
-  return getJson<TraceDetail>(`/v1/traces/${encodeURIComponent(traceId)}`, signal);
+export function getTraceFacets(
+  params: TraceFacetsParams = {},
+  signal?: AbortSignal,
+): Promise<TraceFacets> {
+  return getJson<TraceFacets>(buildUrl("/v1/traces/facets", params), signal);
+}
+
+export function getTrace(
+  traceId: string,
+  params: GetTraceParams = {},
+  signal?: AbortSignal,
+): Promise<TraceDetail> {
+  return getJson<TraceDetail>(
+    buildUrl(`/v1/traces/${encodeURIComponent(traceId)}`, params),
+    signal,
+  );
 }
 
 export function getHealth(signal?: AbortSignal): Promise<Record<string, string>> {

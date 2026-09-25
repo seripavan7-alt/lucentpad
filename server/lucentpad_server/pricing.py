@@ -1,9 +1,11 @@
 """Per-model token prices used to compute ``cost_usd``.
 
-ILLUSTRATIVE PLACEHOLDERS ONLY. These models and prices are stand-ins so the sample data
-and dashboard have plausible numbers. They are NOT checked against any provider's price
-list and must not be quoted as accurate. Choosing the real demo models, their fallbacks and
-their prices is an open M1 decision (see docs/PRD.md, "Decisions and open questions").
+Standard (non-batch, global) list prices in USD per million tokens, checked on 2026-09-25 at:
+- Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+- OpenAI: https://developers.openai.com/api/docs/pricing
+
+Cache-read and cache-write prices exist too, but spans don't carry cache token counts yet, so
+only base input and output are priced. Re-check the pages before quoting these numbers.
 """
 
 from __future__ import annotations
@@ -17,11 +19,11 @@ class Price(NamedTuple):
 
 
 PRICES: dict[str, Price] = {
-    # Anthropic (illustrative)
-    "claude-opus-5-5": Price(5.00, 25.00),
-    "claude-sonnet-5": Price(3.00, 15.00),
+    # Anthropic
+    "claude-opus-5-5": Price(4.00, 20.00),
+    "claude-sonnet-5": Price(2.00, 10.00),
     "claude-haiku-4-5": Price(1.00, 5.00),
-    # OpenAI (illustrative)
+    # OpenAI
     "gpt-5": Price(1.25, 10.00),
     "gpt-5-mini": Price(0.25, 2.00),
 }

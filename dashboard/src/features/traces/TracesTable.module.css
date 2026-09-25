@@ -1,0 +1,207 @@
+/*
+ * Fixed layout: every column has a set width except "Input → Output", which takes the rest.
+ * Below 1200px of table width the LLM calls and Models columns drop out so the preview stays
+ * readable at laptop width; below the table's min-width it scrolls sideways.
+ */
+.tableWrap {
+  container-type: inline-size;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--color-bg);
+  border-bottom: var(--border);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border);
+  white-space: nowrap;
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: var(--space-6);
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: var(--space-6);
+}
+
+.colName {
+  width: 168px;
+}
+
+.colSource {
+  width: 128px;
+}
+
+.colStatus {
+  width: 84px;
+}
+
+.colStarted {
+  width: 132px;
+}
+
+.colPreview {
+  width: auto;
+}
+
+.colDuration {
+  width: 76px;
+}
+
+.colCalls {
+  width: 72px;
+}
+
+.colTokens {
+  width: 104px;
+}
+
+.colCost {
+  width: 76px;
+}
+
+.colModels {
+  width: 152px;
+}
+
+.optional {
+  display: none;
+}
+
+@container (min-width: 1200px) {
+  .optional {
+    display: table-cell;
+  }
+}
+
+.row {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.row:hover {
+  background: var(--color-surface-hover);
+}
+
+.row[data-fresh="true"] {
+  animation: arrive 2.5s var(--ease);
+}
+
+@keyframes arrive {
+  from {
+    background: var(--color-accent-subtle);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row[data-fresh="true"] {
+    animation: none;
+    background: var(--color-accent-subtle);
+  }
+}
+
+.right {
+  text-align: right !important;
+}
+
+.clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.name {
+  font-weight: var(--weight-medium);
+}
+
+.name:focus-visible {
+  border-radius: var(--radius-xs);
+}
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.sort:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sortIcon {
+  color: var(--color-accent-text);
+}
+
+.preview {
+  color: var(--color-text-secondary);
+}
+
+.source {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.sourceKind {
+  color: var(--color-text);
+}
+
+.sep {
+  color: var(--color-text-tertiary);
+}
+
+.models {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  color: var(--color-text-secondary);
+}
+
+.model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moreModels {
+  flex: none;
+  padding: 0 5px;
+  border: var(--border);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}

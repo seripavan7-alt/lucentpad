@@ -14,6 +14,9 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 
 SCHEMA_VERSION = 1
 MAX_BATCH_SPANS = 1000
+PREVIEW_MAX_CHARS = 2000
+"""Longest prompt/response preview kept (``Attr.INPUT_PREVIEW`` / ``Attr.OUTPUT_PREVIEW``)."""
+FACET_MAX_VALUES = 50
 
 
 class Attr:
@@ -33,6 +36,24 @@ class Attr:
     CLIENT = "lucentpad.client"  # "claude-code" | "copilot-chat" | "copilot-cli" | "sdk"
     SESSION_ID = "lucentpad.session_id"
     GUARDRAIL_RULE = "lucentpad.guardrail.rule"
+    # Prompt/response previews (<= PREVIEW_MAX_CHARS); *_TRUNCATED is true when cut at capture.
+    INPUT_PREVIEW = "lucentpad.input.preview"
+    OUTPUT_PREVIEW = "lucentpad.output.preview"
+    INPUT_TRUNCATED = "lucentpad.input.truncated"
+    OUTPUT_TRUNCATED = "lucentpad.output.truncated"
+    # Failover event attributes
+    FAILOVER_FROM_MODEL = "lucentpad.failover.from_model"
+    FAILOVER_TO_MODEL = "lucentpad.failover.to_model"
+    FAILOVER_STATUS_CODE = "lucentpad.failover.status_code"
+    FAILOVER_RETRIES = "lucentpad.failover.retries"
+    # Budget alert event attributes
+    BUDGET_LIMIT_USD = "lucentpad.budget.limit_usd"
+    BUDGET_SPENT_USD = "lucentpad.budget.spent_usd"
+    # Redaction event attributes
+    REDACTION_KIND = "lucentpad.redaction.kind"
+    REDACTION_COUNT = "lucentpad.redaction.count"
+    # Demo support agent
+    REFUND_AMOUNT = "lucentpad.refund.amount"
 
 
 class EventName:
@@ -64,6 +85,8 @@ tool: a ``@span`` step. guardrail: a blocked request, recorded as its own span."
 
 SpanStatus = Literal["ok", "error", "blocked"]
 SpanSource = Literal["sdk", "gateway"]
+TraceOrder = Literal["desc", "asc"]
+"""Traces list order by (start_time, trace_id): newest first (default) or oldest first."""
 
 
 class _Model(BaseModel):
@@ -110,7 +133,18 @@ class SpanBatch(_Model):
 
 
 class IngestAccepted(_Model):
-    accepted: int
+    accepted: int = Field(description="Spans queued for writing (always the whole batch).")
+
+
+class IngestStats(_Model):
+    """Counters of the ingest pipeline since the API started."""
+
+    queue_depth: int = Field(description="Spans accepted but not yet written.")
+    queue_capacity: int
+    accepted_total: int
+    rejected_total: int = Field(description="Spans refused with 429 because the queue was full.")
+    written_total: int
+    write_errors_total: int = Field(description="Spans dropped after the writer gave up retrying.")
 
 
 class ErrorResponse(_Model):
@@ -134,15 +168,50 @@ class TraceSummary(_Model):
     output_tokens: int
     cost_usd: float
     models: list[str]
+    input_preview: str | None = Field(
+        description="The run's first user message (root span's input, else the earliest llm "
+        "span's); null when capture is off."
+    )
+    output_preview: str | None = Field(
+        description="The run's final answer (root span's output, else the latest llm span's)."
+    )
 
 
 class TraceList(_Model):
     traces: list[TraceSummary]
     next_cursor: str | None = Field(
-        description="Opaque cursor for the next page; null when there are no more traces."
+        description="Opaque cursor for the next page; null when there are no more traces. "
+        "Valid only with the same order and filters."
+    )
+    as_of: datetime = Field(
+        description="Server time of this response; pass it as `since` on the next live poll."
     )
 
 
 class TraceDetail(_Model):
     trace: TraceSummary
-    spans: list[Span] = Field(description="All spans in the trace, ordered by start_time.")
+    spans: list[Span] = Field(
+        description="Spans ordered by start_time: all of them, or with `since` only those "
+        "stored after it."
+    )
+    as_of: datetime = Field(
+        description="Server time of this response; pass it as `since` on the next live poll."
+    )
+
+
+class FacetValue(_Model):
+    value: str
+    count: int
+
+
+class TraceFacets(_Model):
+    """Value counts per filter. Each facet's counts apply every other filter but not its own,
+    so ticking a value never hides its siblings. At most ``FACET_MAX_VALUES`` values per facet,
+    by count descending, then value."""
+
+    name: list[FacetValue]
+    status: list[FacetValue]
+    source: list[FacetValue]
+    client: list[FacetValue]
+    model: list[FacetValue]
+    service: list[FacetValue]

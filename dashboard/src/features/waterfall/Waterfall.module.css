@@ -137,9 +137,27 @@
   letter-spacing: 0;
 }
 
+.trailing {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.trailing:empty {
+  display: none;
+}
+
+.cost {
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  font-feature-settings: var(--font-features-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
 .statusFlag {
   flex: none;
-  margin-left: auto;
   padding: 0 6px;
   border-radius: var(--radius-full);
   font-size: var(--text-2xs);

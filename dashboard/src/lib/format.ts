@@ -54,6 +54,7 @@ export function formatRelative(iso: string, now: number = Date.now()): string {
   });
 }
 
+/** Absolute local time, e.g. "Sep 24, 23:02:14" (24-hour clock). */
 export function formatDateTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
@@ -63,8 +64,27 @@ export function formatDateTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   });
+}
+
+/** ISO 8601 in UTC to the second, e.g. "2026-09-24T21:02:14Z". */
+export function formatIsoUtc(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/** One-line "input → output" preview for the traces list; null when nothing was captured. */
+export function previewLine(
+  input: string | null | undefined,
+  output: string | null | undefined,
+): string | null {
+  const clean = (s: string | null | undefined) => (s ? s.replace(/\s+/g, " ").trim() : "");
+  const i = clean(input);
+  const o = clean(output);
+  if (!i && !o) return null;
+  return `${i || "–"} → ${o || "–"}`;
 }
 
 export function shortId(id: string, length = 8): string {

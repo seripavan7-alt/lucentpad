@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,14 @@ from .support import NOW, app_client
 DEMO_DIR = Path(__file__).resolve().parents[2] / "dashboard" / "src" / "demo"
 UPDATE = os.environ.get("LUCENTPAD_UPDATE_DEMO") == "1"
 
-# List queries whose paging the adapter must reproduce exactly.
+
+def _ago(**kw: float) -> str:
+    """An absolute ISO time relative to the snapshot's fixed NOW (the unshifted snapshot)."""
+    return (NOW - timedelta(**kw)).isoformat()
+
+
+# List queries whose paging the adapter must reproduce exactly. A list value is a repeated
+# query parameter (`?status=error&status=blocked`): OR within a filter, AND across filters.
 PARITY_QUERIES: list[dict[str, Any]] = [
     {},
     {"limit": 7},
@@ -35,6 +43,29 @@ PARITY_QUERIES: list[dict[str, Any]] = [
     {"source": "gateway", "limit": 20},
     {"source": "sdk", "status": "error"},
     {"source": "gateway", "status": "blocked"},
+    # R2 / D10: multi-value filters, time window, oldest-first order.
+    {"status": ["error", "blocked"], "limit": 10},
+    {"name": "support-agent.run", "limit": 25},
+    {"name": ["claude-code session", "copilot-cli session"]},
+    {"client": ["copilot-chat", "copilot-cli"], "limit": 15},
+    {"model": "claude-haiku-4-5"},
+    {"model": ["gpt-5", "claude-opus-5-5"], "status": "ok"},
+    {"service": "lucentpad-gateway", "source": "gateway"},
+    {"from": _ago(days=2)},
+    {"to": _ago(days=5), "limit": 20},
+    {"from": _ago(days=4), "to": _ago(days=3), "source": "sdk"},
+    {"order": "asc"},
+    {"order": "asc", "limit": 9, "status": ["error", "blocked"]},
+    {"order": "asc", "from": _ago(days=1), "model": "claude-sonnet-5"},
+]
+
+# Facet queries (`GET /v1/traces/facets`) whose counts the adapter must reproduce exactly.
+FACET_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"status": "error"},
+    {"status": ["error", "blocked"], "source": "sdk"},
+    {"model": "gpt-5", "client": ["copilot-chat", "copilot-cli"]},
+    {"from": _ago(days=3), "to": _ago(days=1), "service": "support-agent"},
 ]
 
 
@@ -71,7 +102,15 @@ async def _build(client: httpx.AsyncClient) -> tuple[dict[str, Any], dict[str, A
         traces.append(detail["trace"])
         spans[tid] = detail["spans"]
     snapshot = {"generated_at": NOW.isoformat(), "traces": traces, "spans": spans}
-    parity = {"queries": [{"params": q, "pages": await _pages(client, q)} for q in PARITY_QUERIES]}
+    facets = []
+    for q in FACET_PARITY_QUERIES:
+        r = await client.get("/v1/traces/facets", params=q)
+        r.raise_for_status()
+        facets.append({"params": q, "facets": r.json()})
+    parity = {
+        "queries": [{"params": q, "pages": await _pages(client, q)} for q in PARITY_QUERIES],
+        "facets": facets,
+    }
     return snapshot, parity
 
 
