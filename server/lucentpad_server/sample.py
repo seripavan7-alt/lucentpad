@@ -41,6 +41,7 @@ WINDOW = timedelta(days=7)
 _SUPPORT_VARIANTS: list[tuple[str, int]] = [
     ("refund", 70),  # llm, lookup_order, llm, issue_refund, draft_email, llm
     ("status", 45),  # llm, lookup_order, llm
+    ("reschedule", 14),  # llm, lookup_order, llm, reschedule_delivery, llm (not shipped yet)
     ("guardrail", 8),  # refund over the limit: blocked by a guardrail span
     ("failover", 6),  # primary 429 -> fallback model
     ("budget", 6),  # crosses the per-run budget: lucentpad.budget.alert
@@ -63,6 +64,10 @@ _STATUS_QUESTIONS = [
     "Where's order {order}?",
     "When will order {order} arrive?",
     "Has order {order} shipped yet?",
+]
+_RESCHEDULE_QUESTIONS = [
+    "Where's order {order}? Can you reschedule delivery to 10 am tomorrow?",
+    "Where's my order {order}? Could it come tomorrow at 10 am instead?",
 ]
 _CODING_PROMPTS = [
     "Why is this test flaky?",
@@ -265,7 +270,13 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
     redacted = rng.random() < 0.3
     common: Attributes = {Attr.SERVICE_NAME: SUPPORT_SERVICE, Attr.CLIENT: "sdk"}
 
-    questions = _STATUS_QUESTIONS if variant in ("status", "not_found") else _QUESTIONS
+    questions = (
+        _STATUS_QUESTIONS
+        if variant in ("status", "not_found")
+        else _RESCHEDULE_QUESTIONS
+        if variant == "reschedule"
+        else _QUESTIONS
+    )
     question = rng.choice(questions).format(order=order)
     if redacted:
         question += " You can reach me at [REDACTED:email]."
@@ -279,6 +290,8 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
     root_message: str | None = None
 
     shipped = trng.choice(["delivered", "in transit", "processing"])
+    if variant == "reschedule":
+        shipped = "processing"  # only an order that hasn't shipped can be rescheduled
     total = trng.choice([19, 24, 35, 49, 59, 89, 120, 149, 180, 250, 480])
     lookup_result = (
         f'lookup_order result: {{"order": {order}, "status": "{shipped}", '
@@ -434,6 +447,27 @@ def _support_run(rng: random.Random, ids: _Ids, start: datetime, variant: str) -
                 "processing": f"Order {order} is being packed and ships tomorrow.",
             }[shipped]
             llm((90, 220), "end_turn", final=True, prompt=lookup_result, answer=final_answer)
+        elif variant == "reschedule":
+            llm(
+                (50, 110),
+                "tool_use",
+                prompt=lookup_result,
+                answer=f"Order {order} hasn't shipped yet, so the delivery can still move. "
+                "Rescheduling it for tomorrow at 10:00.",
+            )
+            tool("reschedule_delivery", (30, 120), 80)
+            final_answer = (
+                f"Order {order} hasn't shipped yet, so I've rescheduled the delivery for "
+                "tomorrow at 10:00 am. You'll get a text when it's on the way."
+            )
+            llm(
+                (90, 200),
+                "end_turn",
+                final=True,
+                prompt=f'reschedule_delivery result: {{"order": {order}, '
+                '"window": "tomorrow 10:00-10:30", "ok": true}',
+                answer=final_answer,
+            )
         elif variant == "guardrail":
             llm((60, 120), "tool_use", prompt=lookup_result, answer=eligible)
             amount = rng.choice([250, 320, 480, 750, 1200])

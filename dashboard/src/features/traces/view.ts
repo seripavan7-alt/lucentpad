@@ -1,7 +1,8 @@
 /*
  * The Traces page's view state, kept in the URL so every view is linkable:
- *   ?range=1h            time-range preset (default 15m, omitted from the URL)
- *   ?order=asc           oldest first (default desc, omitted)
+ *   ?range=1h            time-range preset (default 24h, omitted from the URL)
+ *   ?sort=cost           sort key: started (default, omitted), duration, name, source, cost
+ *   ?order=asc           direction (default desc, omitted)
  *   ?name=a&name=b&status=error&source=sdk&client=…&model=…&service=…
  *                        facet filters, repeated for OR (AND across facets)
  * Paging is not in the URL: any change here starts again from the first page.
@@ -14,7 +15,9 @@ import {
   type Facet,
   type FacetValue,
   type ListTracesParams,
+  TRACE_SORTS,
   type TraceOrder,
+  type TraceSort,
 } from "../../api/types";
 import { clientLabel } from "../../lib/format";
 import { statusLabel } from "../../lib/labels";
@@ -29,13 +32,38 @@ export const RANGES = [
 ] as const;
 
 export type RangeId = (typeof RANGES)[number]["id"];
-export const DEFAULT_RANGE: RangeId = "15m";
+export const DEFAULT_RANGE: RangeId = "24h";
 export const DEFAULT_ORDER: TraceOrder = "desc";
+export const DEFAULT_SORT: TraceSort = "started";
+
+/** The direction a column sorts in when first clicked: biggest/newest first, text A→Z. */
+export const FIRST_ORDER: Record<TraceSort, TraceOrder> = {
+  started: "desc",
+  duration: "desc",
+  cost: "desc",
+  name: "asc",
+  source: "asc",
+};
+
+/** Clicking a sortable header: flip the active column, or switch to another in its first direction. */
+export function nextSort(
+  view: Pick<TracesView, "sort" | "order">,
+  column: TraceSort,
+): { sort: TraceSort; order: TraceOrder } {
+  if (view.sort === column) return { sort: column, order: view.order === "desc" ? "asc" : "desc" };
+  return { sort: column, order: FIRST_ORDER[column] };
+}
+
+/** Live polling may put new traces on top only when the list is newest first. */
+export function prependsLive(view: Pick<TracesView, "sort" | "order">): boolean {
+  return view.sort === "started" && view.order === "desc";
+}
 
 export type FacetSelection = Record<Facet, readonly string[]>;
 
 export interface TracesView {
   range: RangeId;
+  sort: TraceSort;
   order: TraceOrder;
   filters: FacetSelection;
 }
@@ -85,6 +113,8 @@ function unique(values: readonly string[]): string[] {
 export function parseView(params: URLSearchParams): TracesView {
   const rawRange = params.get("range");
   const range = RANGES.find((r) => r.id === rawRange)?.id ?? DEFAULT_RANGE;
+  const rawSort = params.get("sort");
+  const sort = TRACE_SORTS.find((s) => s === rawSort) ?? DEFAULT_SORT;
   const order: TraceOrder = params.get("order") === "asc" ? "asc" : "desc";
   const filters = {} as Record<Facet, readonly string[]>;
   for (const facet of FACETS) {
@@ -93,7 +123,7 @@ export function parseView(params: URLSearchParams): TracesView {
       params.getAll(facet).filter((v) => v !== "" && (!allowed || allowed.includes(v))),
     );
   }
-  return { range, order, filters };
+  return { range, sort, order, filters };
 }
 
 export function activeFilterCount(filters: FacetSelection): number {
@@ -113,6 +143,7 @@ export function filterParams(
 
 export interface ViewPatch {
   range?: RangeId;
+  sort?: TraceSort;
   order?: TraceOrder;
   filters?: Partial<FacetSelection>;
 }
@@ -122,6 +153,10 @@ export function applyPatch(prev: URLSearchParams, patch: ViewPatch): URLSearchPa
   if (patch.range !== undefined) {
     if (patch.range === DEFAULT_RANGE) next.delete("range");
     else next.set("range", patch.range);
+  }
+  if (patch.sort !== undefined) {
+    if (patch.sort === DEFAULT_SORT) next.delete("sort");
+    else next.set("sort", patch.sort);
   }
   if (patch.order !== undefined) {
     if (patch.order === DEFAULT_ORDER) next.delete("order");

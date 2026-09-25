@@ -461,6 +461,8 @@ export interface operations {
                 limit?: number;
                 /** @description `next_cursor` of the previous page. */
                 cursor?: string | null;
+                /** @description Sort key; `order` sets the direction. The cursor encodes both. */
+                sort?: "started" | "duration" | "name" | "source" | "cost";
                 order?: "desc" | "asc";
                 /** @description Live polling: only traces that gained spans after this time (the previous response's `as_of`). Includes a few seconds of overlap, so expect traces already seen and merge by `trace_id`. Not combinable with `cursor`. */
                 since?: string | null;

@@ -1,6 +1,16 @@
 import { useId, useState } from "react";
 import { FACETS, type Facet, type FacetValue, type TraceFacets } from "../../api/types";
-import { ChevronDownIcon } from "../../components/icons";
+import type { ComponentType, SVGProps } from "react";
+import {
+  ChevronDownIcon,
+  ClientIcon,
+  CloseIcon,
+  ModelIcon,
+  ServiceIcon,
+  SourceIcon,
+  StatusIcon,
+  TagIcon,
+} from "../../components/icons";
 import { formatInteger } from "../../lib/format";
 import {
   activeFilterCount,
@@ -14,6 +24,16 @@ import styles from "./FilterPanel.module.css";
 
 /** Facets with more values than this get a search box (Name always has one). */
 const SEARCH_THRESHOLD = 10;
+/** Values shown before "Show all" (selected values always show). */
+const PREVIEW_VALUES = 5;
+const FACET_ICONS: Record<Facet, ComponentType<SVGProps<SVGSVGElement>>> = {
+  name: TagIcon,
+  status: StatusIcon,
+  source: SourceIcon,
+  client: ClientIcon,
+  model: ModelIcon,
+  service: ServiceIcon,
+};
 
 interface FilterPanelProps {
   facets: TraceFacets | undefined;
@@ -86,10 +106,15 @@ function FacetGroup({
   selected: readonly string[];
   onChange: (values: string[]) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(
+    // Every group starts closed, unless something in it is already selected (e.g. from the URL).
+    () => selected.length > 0,
+  );
+  const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState("");
   const bodyId = useId();
   const label = FACET_LABELS[facet];
+  const FacetIcon = FACET_ICONS[facet];
   const rows = facetRows(values, selected);
   const searchable = facet === "name" || rows.length > SEARCH_THRESHOLD;
   const needle = search.trim().toLowerCase();
@@ -102,6 +127,11 @@ function FacetGroup({
             facetValueLabel(facet, r.value).toLowerCase().includes(needle),
         )
       : rows;
+  const hidden = needle || showAll ? 0 : Math.max(0, visible.length - PREVIEW_VALUES);
+  const shown =
+    hidden > 0
+      ? visible.filter((r, i) => i < PREVIEW_VALUES || selected.includes(r.value))
+      : visible;
 
   const toggle = (value: string) => {
     onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
@@ -119,20 +149,22 @@ function FacetGroup({
             setExpanded((v) => !v);
           }}
         >
+          <FacetIcon className={styles.groupIcon} />
+          <span className={styles.groupLabel}>{label}</span>
           <ChevronDownIcon width={12} height={12} className={styles.chevron} />
-          <span>{label}</span>
-          {selected.length > 0 && <span className={styles.badge}>{selected.length}</span>}
         </button>
         {selected.length > 0 && (
           <button
             type="button"
-            className={styles.textButton}
+            className={styles.clearChip}
             aria-label={`Clear ${label}`}
+            title={`Clear ${label}`}
             onClick={() => {
               onChange([]);
             }}
           >
-            Clear
+            <span className="num">{selected.length}</span>
+            <CloseIcon width={10} height={10} />
           </button>
         )}
       </div>
@@ -156,7 +188,7 @@ function FacetGroup({
             <p className={styles.note}>{needle ? "No matches" : "None in this range"}</p>
           ) : (
             <ul className={styles.values}>
-              {visible.map((row) => {
+              {shown.map((row) => {
                 const text = facetValueLabel(facet, row.value);
                 const checked = selected.includes(row.value);
                 return (
@@ -171,6 +203,11 @@ function FacetGroup({
                           toggle(row.value);
                         }}
                       />
+                      <span className={styles.box} aria-hidden="true">
+                        <svg viewBox="0 0 12 12" width="10" height="10">
+                          <path d="M2.6 6.3 5 8.6l4.4-5" pathLength={1} />
+                        </svg>
+                      </span>
                       <span
                         className={
                           facet === "model" ? `${styles.valueText} mono` : styles.valueText
@@ -186,6 +223,17 @@ function FacetGroup({
                 );
               })}
             </ul>
+          )}
+          {hidden > 0 && (
+            <button
+              type="button"
+              className={styles.more}
+              onClick={() => {
+                setShowAll(true);
+              }}
+            >
+              Show {hidden} more
+            </button>
           )}
         </div>
       )}

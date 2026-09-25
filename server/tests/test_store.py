@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -10,7 +13,15 @@ import pytest_asyncio
 
 from lucentpad_server import db, sample
 from lucentpad_server.query import TraceFilter
-from lucentpad_server.schema import FACET_MAX_VALUES, PREVIEW_MAX_CHARS, Attr, Span, SpanEvent
+from lucentpad_server.schema import (
+    FACET_MAX_VALUES,
+    PREVIEW_MAX_CHARS,
+    Attr,
+    Span,
+    SpanEvent,
+    TraceOrder,
+    TraceSort,
+)
 from lucentpad_server.store import Cursor, InvalidCursorError, SpanStore
 
 from .support import NOW
@@ -154,10 +165,41 @@ async def test_empty_and_unknown(pool: asyncpg.Pool) -> None:
 def test_cursor_roundtrip() -> None:
     c = Cursor(NOW, TRACE)
     assert Cursor.decode(c.encode()) == c
+    for c in (
+        Cursor(1234.567, TRACE, "duration", "asc", "fp"),
+        Cursor(Decimal("0.01234567"), TRACE, "cost"),
+        Cursor("support-agent.run", TRACE, "name", "asc"),
+        Cursor("gateway", TRACE, "source"),
+    ):
+        assert Cursor.decode(c.encode()) == c
 
 
 @pytest.mark.parametrize("token", ["", "not-base64!", "eyJ0IjogMX0", "bnVsbA"])
 def test_cursor_invalid(token: str) -> None:
+    with pytest.raises(InvalidCursorError):
+        Cursor.decode(token)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"s": "started", "k": "2026-09-25T12:00:00"},  # naive time
+        {"s": "started", "k": 1.5},
+        {"s": "duration", "k": "12.5"},
+        {"s": "duration", "k": True},
+        {"s": "duration", "k": float("nan")},
+        {"s": "cost", "k": 0.5},
+        {"s": "cost", "k": "abc"},
+        {"s": "cost", "k": "Infinity"},
+        {"s": "name", "k": 3},
+        {"s": "colour", "k": "red"},
+        {"s": "name", "k": "x", "o": "sideways"},
+        {"k": "2026-09-25T12:00:00+00:00"},  # no sort
+    ],
+)
+def test_cursor_key_must_match_sort(fields: dict[str, Any]) -> None:
+    data = {"id": TRACE, "o": "desc", "f": "", **fields}
+    token = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
     with pytest.raises(InvalidCursorError):
         Cursor.decode(token)
 
@@ -302,7 +344,13 @@ async def test_sample_shift(pool: asyncpg.Pool) -> None:
     await store.insert_spans(spans, sample=True)
     with_event = next(s for s in spans if s.events)
     delta = await store.shift_sample_to_now()
-    assert delta is not None and timedelta(days=2, hours=23) < delta < timedelta(days=3, hours=1)
+    # Expected: move the newest trace start to 60 s ago. (Not simply ~3 days: the sample favours
+    # working hours, so its newest trace can start well before the generation time.)
+    trace_starts: dict[str, datetime] = {}
+    for s in spans:
+        trace_starts[s.trace_id] = min(trace_starts.get(s.trace_id, s.start_time), s.start_time)
+    expected = datetime.now(UTC) - timedelta(seconds=60) - max(trace_starts.values())
+    assert delta is not None and abs(delta - expected) < timedelta(seconds=5)
     assert timedelta(seconds=59) < await _newest_start(pool) < timedelta(seconds=65)
     detail = await store.get_trace(with_event.trace_id)
     assert detail is not None
@@ -351,3 +399,116 @@ async def test_no_shift_without_sample_flag(pool: asyncpg.Pool) -> None:
     assert await store.shift_sample_to_now() is None  # empty
     await store.insert_spans(sample.generate(datetime.now(UTC) - timedelta(days=1)))
     assert await store.shift_sample_to_now() is None  # inserted as real data
+
+
+# --------------------------------------------------------------------------- sorts
+
+
+def _sort_fixture() -> list[Span]:
+    """36 single-span traces with many ties on every sort key; names that differ between byte
+    order and a linguistic collation ("Zeta" < "alpha" < "Émile" in code point order)."""
+    names = ["alpha", "Zeta", "Émile", "_tool", "alpha", "beta"]
+    spans = []
+    for i in range(36):
+        start = NOW - timedelta(minutes=i % 5)
+        spans.append(
+            Span.model_validate(
+                {
+                    "trace_id": f"{(i * 7919) % 997 + 1:032x}",
+                    "span_id": f"{i + 1:016x}",
+                    "name": names[i % len(names)],
+                    "kind": "agent",
+                    "source": "sdk" if i % 3 else "gateway",
+                    "start_time": start,
+                    "end_time": start + timedelta(milliseconds=100 * (i % 4) + 0.5),
+                    "status": "error" if i % 4 == 0 else "ok",
+                    "attributes": {Attr.COST_USD: [0.0, 0.00012345, 1.5][i % 3]},
+                }
+            )
+        )
+    return spans
+
+
+_SORT_KEYS: dict[str, Any] = {
+    "started": lambda t: t.start_time,
+    "duration": lambda t: t.duration_ms,
+    "name": lambda t: t.name.encode(),  # UTF-8 byte order == code point order
+    "source": lambda t: t.source,
+    "cost": lambda t: t.cost_usd,
+}
+
+
+@pytest.mark.parametrize("order", ["desc", "asc"])
+@pytest.mark.parametrize("sort", list(_SORT_KEYS))
+@pytest.mark.parametrize(
+    "filters",
+    [
+        TraceFilter(),
+        TraceFilter(status=("error",)),
+        TraceFilter(start=NOW - timedelta(minutes=3), end=NOW, source=("sdk",)),
+    ],
+)
+async def test_sort_pages_every_trace_once(
+    pool: asyncpg.Pool, sort: Any, order: Any, filters: TraceFilter
+) -> None:
+    store = SpanStore(pool)
+    await store.insert_spans(_sort_fixture())
+    everything = (await store.list_traces(TraceFilter(), limit=200)).traces
+    assert len(everything) == 36
+    matching = [
+        t
+        for t in everything
+        if (filters.start is None or t.start_time >= filters.start)
+        and (filters.end is None or t.start_time < filters.end)
+        and (not filters.status or t.status in filters.status)
+        and (not filters.source or t.source in filters.source)
+    ]
+    key = _SORT_KEYS[sort]
+    expected = sorted(matching, key=lambda t: (key(t), t.trace_id), reverse=order == "desc")
+    got: list[str] = []
+    cursor: str | None = None
+    for _ in range(100):
+        page = await store.list_traces(filters, limit=4, cursor=cursor, sort=sort, order=order)
+        assert len(page.traces) <= 4
+        got += [t.trace_id for t in page.traces]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert got == [t.trace_id for t in expected]
+    # Every sort has ties, so trace_id really is the tie-breaker.
+    assert len({key(t) for t in matching}) < len(matching)
+
+
+async def test_sort_cursor_bound_to_sort(pool: asyncpg.Pool) -> None:
+    store = SpanStore(pool)
+    await store.insert_spans(_sort_fixture())
+    page = await store.list_traces(TraceFilter(), limit=3, sort="cost")
+    assert page.next_cursor is not None
+    combos: list[tuple[TraceSort, TraceOrder]] = [
+        ("started", "desc"),
+        ("duration", "desc"),
+        ("cost", "asc"),
+    ]
+    for sort, order in combos:
+        with pytest.raises(InvalidCursorError):
+            await store.list_traces(
+                TraceFilter(), limit=3, cursor=page.next_cursor, sort=sort, order=order
+            )
+
+
+async def test_sort_with_since(pool: asyncpg.Pool) -> None:
+    store = SpanStore(pool)
+    await store.insert_spans(_sort_fixture())
+    since = datetime.now(UTC) - timedelta(hours=1)
+    live = await store.list_traces(
+        TraceFilter(), limit=200, sort="duration", order="asc", since=since
+    )
+    assert live.next_cursor is None and len(live.traces) == 36
+    keys = [(t.duration_ms, t.trace_id) for t in live.traces]
+    assert keys == sorted(keys)
+    capped = await store.list_traces(TraceFilter(), limit=5, sort="name", since=since)
+    assert capped.next_cursor is None
+    assert [t.trace_id for t in capped.traces] == [
+        t.trace_id
+        for t in sorted(live.traces, key=lambda t: (t.name.encode(), t.trace_id))[::-1][:5]
+    ]

@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { traceListPage1 } from "../test/fixtures";
@@ -24,6 +25,15 @@ describe("Shell and placeholder pages", () => {
   it("redirects / to /traces", async () => {
     mockFetch({ "/v1/traces": () => traceListPage1 });
     renderApp("/");
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(getLocation()).toBe("/traces");
+  });
+
+  it("links the logo home (/ goes to Traces)", async () => {
+    mockFetch({ "/v1/traces": () => traceListPage1 });
+    const user = userEvent.setup();
+    renderApp("/costs");
+    await user.click(screen.getByRole("link", { name: "LucentPad home" }));
     expect(await screen.findByRole("table")).toBeInTheDocument();
     expect(getLocation()).toBe("/traces");
   });

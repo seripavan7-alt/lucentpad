@@ -1,13 +1,17 @@
 import { useId, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLiveTraces, useTraceFacets, useTraces } from "../api/queries";
 import { FilterIcon, RefreshIcon } from "../components/icons";
 import { PageHeader } from "../components/PageHeader";
+import { useSidebarSlot } from "../components/SidebarSlot";
+import { useMediaQuery } from "../lib/useMediaQuery";
 import { SegmentedControl, type SegmentOption } from "../components/SegmentedControl";
 import { Button, EmptyState, ErrorState } from "../components/States";
 import { FilterPanel } from "../features/traces/FilterPanel";
 import { TracesTable } from "../features/traces/TracesTable";
 import {
   activeFilterCount,
+  nextSort,
   NO_FILTERS,
   RANGES,
   rangeInfo,
@@ -16,6 +20,9 @@ import {
   type RangeId,
 } from "../features/traces/view";
 import styles from "./TracesPage.module.css";
+
+/** Must match the sidebar breakpoint in components/Layout.module.css. */
+const NARROW = "(max-width: 720px)";
 
 const RANGE_OPTIONS: SegmentOption<RangeId>[] = RANGES.map((r) => ({ value: r.id, label: r.id }));
 
@@ -34,6 +41,11 @@ export function TracesPage() {
   const fresh = useLiveTraces(view, query.isSuccess);
   const [panelOpen, setPanelOpen] = useState(false);
   const panelId = useId();
+  // Filters live in the app sidebar under the nav; on narrow screens (where the sidebar is a
+  // top bar) they open inline under the header with the "Filters" button instead.
+  const slot = useSidebarSlot();
+  const narrow = useMediaQuery(NARROW);
+  const inSidebar = slot !== null && !narrow;
 
   const traces = query.data?.pages.flatMap((page) => page.traces) ?? [];
   const active = activeFilterCount(view.filters);
@@ -44,25 +56,41 @@ export function TracesPage() {
     void facets.refetch();
   };
 
+  const filterPanel = (
+    <FilterPanel
+      id={panelId}
+      open={inSidebar || panelOpen}
+      facets={facets.data}
+      loading={facets.isPending}
+      error={facets.isError}
+      filters={view.filters}
+      onChange={(filters) => {
+        update({ filters });
+      }}
+    />
+  );
+
   return (
     <>
       <PageHeader
         title="Traces"
         actions={
           <>
-            <button
-              type="button"
-              className={styles.filtersButton}
-              aria-expanded={panelOpen}
-              aria-controls={panelId}
-              onClick={() => {
-                setPanelOpen((v) => !v);
-              }}
-            >
-              <FilterIcon width={14} height={14} />
-              Filters
-              {active > 0 && <span className={styles.filtersCount}>{active}</span>}
-            </button>
+            {!inSidebar && (
+              <button
+                type="button"
+                className={styles.filtersButton}
+                aria-expanded={panelOpen}
+                aria-controls={panelId}
+                onClick={() => {
+                  setPanelOpen((v) => !v);
+                }}
+              >
+                <FilterIcon width={14} height={14} />
+                Filters
+                {active > 0 && <span className={styles.filtersCount}>{active}</span>}
+              </button>
+            )}
             <SegmentedControl
               label="Time range"
               options={RANGE_OPTIONS}
@@ -84,18 +112,8 @@ export function TracesPage() {
           </>
         }
       />
+      {inSidebar ? createPortal(filterPanel, slot) : panelOpen && filterPanel}
       <div className={styles.layout}>
-        <FilterPanel
-          id={panelId}
-          open={panelOpen}
-          facets={facets.data}
-          loading={facets.isPending}
-          error={facets.isError}
-          filters={view.filters}
-          onChange={(filters) => {
-            update({ filters });
-          }}
-        />
         <div className={styles.body}>
           {query.isPending ? (
             <TableSkeleton />
@@ -151,10 +169,12 @@ export function TracesPage() {
             <>
               <TracesTable
                 traces={traces}
+                sort={view.sort}
                 order={view.order}
                 fresh={fresh}
-                onToggleOrder={() => {
-                  update({ order: view.order === "desc" ? "asc" : "desc" });
+                stale={query.isPlaceholderData}
+                onSort={(column) => {
+                  update(nextSort(view, column));
                 }}
               />
               {query.isFetchNextPageError && (
@@ -162,7 +182,7 @@ export function TracesPage() {
                   Couldn&apos;t load more traces: {query.error.message}
                 </p>
               )}
-              {query.hasNextPage && (
+              {query.hasNextPage && !query.isPlaceholderData && (
                 <div className={styles.more}>
                   <Button
                     onClick={() => {

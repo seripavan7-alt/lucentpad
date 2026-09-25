@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { setFetcher } from "../api/client";
 import { AppRoutes } from "../App";
@@ -32,6 +33,11 @@ describe("Dashboard in demo mode", () => {
       "/lucentpad/",
     );
     expect(screen.getByText("Demo data")).toBeInTheDocument();
+    // The logo goes back to the landing page.
+    expect(screen.getByRole("link", { name: "LucentPad home" })).toHaveAttribute(
+      "href",
+      "/lucentpad/",
+    );
     expect(screen.queryByText("API connected")).not.toBeInTheDocument();
     const table = await screen.findByRole("table");
     const rows = await within(table).findAllByRole("row");
@@ -39,6 +45,7 @@ describe("Dashboard in demo mode", () => {
     expect(within(table).getAllByText(snapshot.traces[0]!.name).length).toBeGreaterThan(0);
     // The filter panel's counts come from the adapter's facets.
     const panel = screen.getByRole("complementary", { name: "Filters" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Name" }));
     expect(await within(panel).findByRole("checkbox", { name: "support-agent.run" })).toBeVisible();
   });
 });

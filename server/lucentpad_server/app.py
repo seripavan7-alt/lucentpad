@@ -29,6 +29,7 @@ from lucentpad_server.schema import (
     TraceFacets,
     TraceList,
     TraceOrder,
+    TraceSort,
 )
 from lucentpad_server.store import InvalidCursorError, SpanStore
 
@@ -175,6 +176,10 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
         cursor: Annotated[
             str | None, Query(description="`next_cursor` of the previous page.")
         ] = None,
+        sort: Annotated[
+            TraceSort,
+            Query(description="Sort key; `order` sets the direction. The cursor encodes both."),
+        ] = "started",
         order: TraceOrder = "desc",
         since: Annotated[
             datetime | None,
@@ -192,7 +197,7 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
             raise _invalid("since", "timestamp must include a timezone")
         try:
             return await get_store(request).list_traces(
-                filters, limit=limit, cursor=cursor, order=order, since=since
+                filters, limit=limit, cursor=cursor, sort=sort, order=order, since=since
             )
         except InvalidCursorError:
             raise _invalid("cursor", "invalid cursor for this order and filter set") from None

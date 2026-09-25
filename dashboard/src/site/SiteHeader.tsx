@@ -8,11 +8,11 @@ export function SiteHeader() {
   return (
     <header className={styles.header}>
       <Link to="/" className={styles.home} aria-label="LucentPad home">
-        <Logo size={20} />
+        <Logo size={30} />
       </Link>
       <nav className={styles.headerNav} aria-label="Site">
         <Link to="/docs/getting-started">Docs</Link>
-        <a href={siteHref(DEMO_START)}>Demo</a>
+        <a href={siteHref(DEMO_START)}>Dashboard</a>
         <a href={GITHUB_URL}>GitHub</a>
         <span className={styles.theme}>
           <ThemeToggle />

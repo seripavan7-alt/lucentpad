@@ -57,6 +57,20 @@ PARITY_QUERIES: list[dict[str, Any]] = [
     {"order": "asc"},
     {"order": "asc", "limit": 9, "status": ["error", "blocked"]},
     {"order": "asc", "from": _ago(days=1), "model": "claude-sonnet-5"},
+    # Sort by column (ties on trace_id in the same direction; name/source in code point order).
+    {"sort": "started", "order": "asc", "limit": 50},
+    {"sort": "duration"},
+    {"sort": "duration", "order": "asc", "limit": 11},
+    {"sort": "duration", "status": ["error", "blocked"], "limit": 6},
+    {"sort": "name"},
+    {"sort": "name", "order": "asc", "limit": 13},
+    {"sort": "name", "order": "asc", "from": _ago(days=3), "source": "sdk", "limit": 8},
+    {"sort": "source", "limit": 17},
+    {"sort": "source", "order": "asc"},
+    {"sort": "source", "order": "asc", "model": "gpt-5", "limit": 5},
+    {"sort": "cost"},
+    {"sort": "cost", "order": "asc", "limit": 12},
+    {"sort": "cost", "from": _ago(days=4), "to": _ago(days=1), "client": "copilot-cli", "limit": 4},
 ]
 
 # Facet queries (`GET /v1/traces/facets`) whose counts the adapter must reproduce exactly.

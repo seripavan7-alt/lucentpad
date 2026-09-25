@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TraceSummary } from "../api/types";
@@ -44,9 +44,14 @@ function mockList(list: (url: URL) => unknown = () => traceListPage1) {
 const fromOf = (url: URL) => Date.parse(url.searchParams.get("from") ?? "");
 const dataRows = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
 const panel = () => screen.getByRole("complementary", { name: "Filters" });
-const group = (name: string) => within(panel()).getByRole("region", { name });
-const facetsLoaded = () =>
-  within(screen.getByRole("region", { name: "Status" })).findByRole("checkbox", { name: "OK" });
+/** A facet group, opened first if collapsed (every group starts closed). */
+const group = (name: string) => {
+  const region = within(panel()).getByRole("region", { name });
+  const toggle = within(region).getAllByRole("button")[0]!;
+  if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
+  return within(panel()).getByRole("region", { name });
+};
+const facetsLoaded = async () => within(group("Status")).findByRole("checkbox", { name: "OK" });
 const table = () => within(screen.getByRole("table"));
 
 describe("Traces list", () => {
@@ -108,18 +113,18 @@ describe("Traces list", () => {
     expect(blocked).not.toHaveAttribute("title");
   });
 
-  it("asks for the last 15 minutes, newest first, by default", async () => {
+  it("asks for the last 24 hours, newest first, by default", async () => {
     const mock = mockList();
     renderApp("/traces");
     await screen.findByRole("table");
     const first = listRequests(mock)[0]!;
-    expect(fromOf(first)).toBe(NOW - 15 * 60_000);
+    expect(fromOf(first)).toBe(NOW - 86_400_000);
     expect(first.searchParams.get("order")).toBe("desc");
     expect(first.searchParams.get("limit")).toBe("50");
     expect(first.searchParams.has("to")).toBe(false);
-    expect(fromOf(facetRequests(mock)[0]!)).toBe(NOW - 15 * 60_000);
+    expect(fromOf(facetRequests(mock)[0]!)).toBe(NOW - 86_400_000);
     const range = screen.getByRole("group", { name: "Time range" });
-    expect(within(range).getByRole("button", { name: "15m" })).toHaveAttribute(
+    expect(within(range).getByRole("button", { name: "24h" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -143,7 +148,7 @@ describe("Traces list", () => {
       expect(fromOf(facetRequests(mock).at(-1)!)).toBe(NOW - 3600_000);
     });
 
-    await user.click(within(range).getByRole("button", { name: "15m" }));
+    await user.click(within(range).getByRole("button", { name: "24h" }));
     expect(getLocation()).toBe("/traces");
   });
 
@@ -159,9 +164,9 @@ describe("Traces list", () => {
     await waitFor(() => {
       expect(listRequests(mock).length).toBeGreaterThan(before);
     });
-    expect(fromOf(listRequests(mock).at(-1)!)).toBe(NOW + 60_000 - 15 * 60_000);
+    expect(fromOf(listRequests(mock).at(-1)!)).toBe(NOW + 60_000 - 86_400_000);
     await waitFor(() => {
-      expect(fromOf(facetRequests(mock).at(-1)!)).toBe(NOW + 60_000 - 15 * 60_000);
+      expect(fromOf(facetRequests(mock).at(-1)!)).toBe(NOW + 60_000 - 86_400_000);
     });
   });
 
@@ -259,6 +264,40 @@ describe("Traces list", () => {
     await user.click(clearAll);
     expect(getLocation()).toBe("/traces?range=4h");
     expect(within(panel()).queryByRole("button", { name: /Clear all/ })).not.toBeInTheDocument();
+  });
+
+  it("puts the filters in the app sidebar, under the nav", async () => {
+    mockList();
+    renderApp("/traces");
+    await facetsLoaded();
+    const sidebarNav = screen.getByRole("navigation", { name: "Main" });
+    expect(sidebarNav.parentElement).toContainElement(panel());
+    expect(screen.getByRole("main")).not.toContainElement(panel());
+    expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+  });
+
+  it("starts with every group closed, and shows the first 5 values of a long facet", async () => {
+    mockList();
+    const user = userEvent.setup();
+    renderApp("/traces?model=model-3");
+    await screen.findByRole("table");
+    const region = (name: string) => within(panel()).getByRole("region", { name });
+    const expanded = (name: string) =>
+      within(region(name)).getAllByRole("button")[0]!.getAttribute("aria-expanded");
+    // Closed by default; a group with a selection (Model, from the URL) starts open.
+    expect(["Name", "Status", "Source", "Client", "Model", "Service"].map(expanded)).toEqual([
+      "false",
+      "false",
+      "false",
+      "false",
+      "true",
+      "false",
+    ]);
+    await facetsLoaded();
+    const model = within(group("Model")); // 12 values
+    expect(model.getAllByRole("checkbox")).toHaveLength(5);
+    await user.click(model.getByRole("button", { name: "Show 7 more" }));
+    expect(within(group("Model")).getAllByRole("checkbox")).toHaveLength(12);
   });
 
   it("keeps selected values visible at count 0", async () => {
@@ -379,6 +418,131 @@ describe("Traces list", () => {
     expect(getLocation()).toBe("/traces");
   });
 
+  it("sorts by Name, Source, Duration and Cost: first direction, flip, URL and params", async () => {
+    const mock = mockList();
+    const user = userEvent.setup();
+    renderApp("/traces");
+    await screen.findByRole("table");
+    const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(name) });
+    const sortButton = (name: string) =>
+      within(header(name)).getByRole("button", { name: new RegExp(name) });
+    const lastList = () => listRequests(mock).at(-1)!.searchParams;
+
+    // Only the active column has aria-sort; every sortable header is a real button.
+    expect(header("Started")).toHaveAttribute("aria-sort", "descending");
+    for (const name of ["Name", "Source", "Duration", "Cost"]) {
+      expect(header(name)).not.toHaveAttribute("aria-sort");
+      expect(sortButton(name)).toHaveAttribute("type", "button");
+    }
+    expect(within(header("Status")).queryByRole("button")).not.toBeInTheDocument();
+    // The default request leaves sort out.
+    expect(lastList().has("sort")).toBe(false);
+
+    const cases = [
+      ["Cost", "cost", "desc"],
+      ["Duration", "duration", "desc"],
+      ["Name", "name", "asc"],
+      ["Source", "source", "asc"],
+    ] as const;
+    for (const [label, sort, first] of cases) {
+      await user.click(sortButton(label));
+      expect(getLocation()).toBe(
+        first === "desc" ? `/traces?sort=${sort}` : `/traces?sort=${sort}&order=asc`,
+      );
+      await waitFor(() => {
+        expect(lastList().get("sort")).toBe(sort);
+      });
+      expect(lastList().get("order")).toBe(first);
+      await waitFor(() => {
+        expect(header(label)).toHaveAttribute(
+          "aria-sort",
+          first === "desc" ? "descending" : "ascending",
+        );
+      });
+      expect(header("Started")).not.toHaveAttribute("aria-sort");
+
+      // Second click flips.
+      await user.click(sortButton(label));
+      const flipped = first === "desc" ? "asc" : "desc";
+      expect(getLocation()).toBe(
+        flipped === "desc" ? `/traces?sort=${sort}` : `/traces?sort=${sort}&order=asc`,
+      );
+      await waitFor(() => {
+        expect(lastList().get("order")).toBe(flipped);
+      });
+      expect(lastList().get("sort")).toBe(sort);
+      await waitFor(() => {
+        expect(header(label)).toHaveAttribute(
+          "aria-sort",
+          flipped === "desc" ? "descending" : "ascending",
+        );
+      });
+    }
+
+    // Back to Started: newest first, both params dropped.
+    await user.click(sortButton("Started"));
+    expect(getLocation()).toBe("/traces");
+    await waitFor(() => {
+      expect(lastList().has("sort")).toBe(false);
+    });
+    expect(lastList().get("order")).toBe("desc");
+  });
+
+  it("works the sort headers from the keyboard", async () => {
+    mockList();
+    const user = userEvent.setup();
+    renderApp("/traces");
+    await screen.findByRole("table");
+    const cost = within(screen.getByRole("columnheader", { name: /Cost/ })).getByRole("button");
+    cost.focus();
+    await user.keyboard("{Enter}");
+    expect(getLocation()).toBe("/traces?sort=cost");
+    await user.keyboard(" ");
+    expect(getLocation()).toBe("/traces?sort=cost&order=asc");
+  });
+
+  it("restores the sort from the URL", async () => {
+    const mock = mockList();
+    renderApp("/traces?sort=duration&order=asc");
+    await screen.findByRole("table");
+    const first = listRequests(mock)[0]!;
+    expect(first.searchParams.get("sort")).toBe("duration");
+    expect(first.searchParams.get("order")).toBe("asc");
+    expect(screen.getByRole("columnheader", { name: /Duration/ })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+    expect(screen.getByRole("columnheader", { name: /Started/ })).not.toHaveAttribute("aria-sort");
+  });
+
+  it("resets paging when the sort changes, and pages with the sort", async () => {
+    const mock = mockList((url) =>
+      url.searchParams.get("cursor") ? traceListPage2 : traceListPage1,
+    );
+    const user = userEvent.setup();
+    renderApp("/traces?sort=name&order=asc");
+    await screen.findByRole("table");
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(
+      await within(await screen.findByRole("table")).findByText("copilot-cli request"),
+    ).toBeInTheDocument();
+    const page2 = listRequests(mock).at(-1)!.searchParams;
+    expect(page2.get("cursor")).toBe("cursor-page-2");
+    expect(page2.get("sort")).toBe("name");
+    expect(page2.get("order")).toBe("asc");
+
+    await user.click(
+      within(screen.getByRole("columnheader", { name: /Cost/ })).getByRole("button"),
+    );
+    await waitFor(() => {
+      expect(table().queryByText("copilot-cli request")).not.toBeInTheDocument();
+    });
+    const last = listRequests(mock).at(-1)!.searchParams;
+    expect(last.has("cursor")).toBe(false);
+    expect(last.get("sort")).toBe("cost");
+    expect(dataRows()).toHaveLength(3);
+  });
+
   it("keeps loaded rows when a later page fails", async () => {
     mockList((url) =>
       url.searchParams.get("cursor") ? new HttpError(500, { detail: "boom" }) : traceListPage1,
@@ -411,10 +575,10 @@ describe("Traces list", () => {
   it("shows a range-aware empty state that widens to 24 hours", async () => {
     const mock = mockList(() => ({ traces: [], next_cursor: null, as_of: "2026-09-25T10:10:00Z" }));
     const user = userEvent.setup();
-    renderApp("/traces");
+    renderApp("/traces?range=15m");
     expect(await screen.findByText("No traces in the last 15 minutes")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show last 24 hours" }));
-    expect(getLocation()).toBe("/traces?range=24h");
+    expect(getLocation()).toBe("/traces");
     expect(await screen.findByText("No traces in the last 24 hours")).toBeInTheDocument();
     await waitFor(() => {
       expect(fromOf(listRequests(mock).at(-1)!)).toBe(NOW - 86_400_000);
@@ -435,13 +599,20 @@ describe("Traces list", () => {
 
   it("collapses the filter panel behind a Filters button on narrow screens", async () => {
     mockList();
+    // Narrow: the sidebar is a top bar, so the panel opens inline under the header instead.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
     const user = userEvent.setup();
     renderApp("/traces?status=error");
     await screen.findByRole("table");
     const button = screen.getByRole("button", { name: /^Filters/ });
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(button).toHaveTextContent("1"); // active filter count
-    expect(panel()).toHaveAttribute("data-open", "false");
+    expect(screen.queryByRole("complementary", { name: "Filters" })).not.toBeInTheDocument();
     await user.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(panel()).toHaveAttribute("data-open", "true");
@@ -542,6 +713,29 @@ describe("Traces list, live", () => {
       expect(livePolls(mock)).toHaveLength(1);
     });
     expect(livePolls(mock)[0]!.searchParams.get("order")).toBe("asc");
+    expect(screen.queryByText("support-agent-new")).not.toBeInTheDocument();
+    expect(dataRows()).toHaveLength(3);
+  });
+
+  it("does not prepend when sorted by another column, but updates rows in place", async () => {
+    const updatedSupport = { ...supportSummary, duration_ms: 5200 };
+    const mock = liveMock(() => ({
+      traces: [newTrace, updatedSupport],
+      next_cursor: null,
+      as_of: AS_OF_2,
+    }));
+    renderApp("/traces?sort=cost");
+    await screen.findByRole("table");
+    await tick(3000);
+    await waitFor(() => {
+      expect(livePolls(mock)).toHaveLength(1);
+    });
+    const poll = livePolls(mock)[0]!;
+    expect(poll.searchParams.get("sort")).toBe("cost");
+    expect(poll.searchParams.get("order")).toBe("desc");
+    await waitFor(() => {
+      expect(dataRows()[0]).toHaveTextContent("5.20s");
+    });
     expect(screen.queryByText("support-agent-new")).not.toBeInTheDocument();
     expect(dataRows()).toHaveLength(3);
   });

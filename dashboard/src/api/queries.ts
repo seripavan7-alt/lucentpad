@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   filterParams,
+  prependsLive,
   rangeFrom,
   type FacetSelection,
   type RangeId,
@@ -44,7 +45,12 @@ interface PageParam {
 }
 
 export function tracesKey(view: TracesView): QueryKey {
-  return ["traces", view.range, view.order, filterParams(view.filters)];
+  return ["traces", view.range, view.sort, view.order, filterParams(view.filters)];
+}
+
+/** `sort` as a request param: left out for the API's default ("started"). */
+function sortParam(view: TracesView): { sort?: TracesView["sort"] } {
+  return view.sort === "started" ? {} : { sort: view.sort };
 }
 
 export function useTraces(view: TracesView) {
@@ -58,6 +64,7 @@ export function useTraces(view: TracesView) {
         {
           limit: PAGE_SIZE,
           cursor: pageParam?.cursor,
+          ...sortParam(view),
           order: view.order,
           from,
           ...filterParams(view.filters),
@@ -69,6 +76,9 @@ export function useTraces(view: TracesView) {
     initialPageParam: null as PageParam | null,
     getNextPageParam: (last): PageParam | null =>
       last.next_cursor ? { cursor: last.next_cursor, from: last.from } : null,
+    // Keep showing the old rows while a new sort/filter loads, so the table (and the focused
+    // sort header) stays in place instead of flashing to the skeleton.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -85,7 +95,7 @@ export function useTraceFacets(view: TracesView) {
   });
 }
 
-/** Replace known traces in place; put unseen ones on top of the first page (desc only). */
+/** Replace known traces in place; put unseen ones on top of the first page (newest first only). */
 export function mergeLivePage(
   data: InfiniteData<TracePage>,
   update: TraceList,
@@ -114,8 +124,8 @@ export function mergeLivePage(
 
 /**
  * Live updates for the traces list: every LIST_POLL_MS, ask for traces that gained spans
- * since the previous response's `as_of`, update loaded rows in place and (newest-first
- * only) prepend new ones. Loaded pages, filters and scroll are kept. Returns the ids to
+ * since the previous response's `as_of`, update loaded rows in place and (sorted by Started,
+ * newest first only) prepend new ones; other sorts don't re-sort rows as they change. Loaded pages, filters and scroll are kept. Returns the ids to
  * highlight.
  */
 export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<string> {
@@ -149,6 +159,7 @@ export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<s
       const update = await listTraces(
         {
           limit: LIVE_LIMIT,
+          ...sortParam(view),
           order: view.order,
           since: first.as_of,
           from: rangeFrom(view.range),
@@ -163,7 +174,7 @@ export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<s
       }
       const current = client.getQueryData<InfiniteData<TracePage>>(key);
       if (!current) return;
-      const merged = mergeLivePage(current, update, view.order === "desc");
+      const merged = mergeLivePage(current, update, prependsLive(view));
       client.setQueryData(key, merged.data);
       if (merged.added.length > 0) {
         highlight(merged.added);

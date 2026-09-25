@@ -2,14 +2,23 @@ import { describe, expect, it } from "vitest";
 import { nextPollDelay } from "../../lib/usePolling";
 import { mergeLivePage, mergeSpans, type TracePage } from "../../api/queries";
 import { blockedSummary, supportSpans, supportSummary } from "../../test/fixtures";
-import { applyPatch, facetRows, filterParams, parseView, rangeFrom, rangePhrase } from "./view";
+import {
+  applyPatch,
+  facetRows,
+  filterParams,
+  nextSort,
+  parseView,
+  prependsLive,
+  rangeFrom,
+  rangePhrase,
+} from "./view";
 
 describe("traces view state", () => {
   it("parses defaults and drops invalid values", () => {
     const view = parseView(
       new URLSearchParams("range=2y&order=up&status=bogus&status=error&name="),
     );
-    expect(view.range).toBe("15m");
+    expect(view.range).toBe("24h");
     expect(view.order).toBe("desc");
     expect(view.filters.status).toEqual(["error"]);
     expect(view.filters.name).toEqual([]);
@@ -17,12 +26,41 @@ describe("traces view state", () => {
 
   it("writes patches, omitting defaults", () => {
     const next = applyPatch(new URLSearchParams("span=x&range=1h"), {
-      range: "15m",
+      range: "24h",
       order: "asc",
       filters: { model: ["a", "b", "a"] },
     });
     expect(next.toString()).toBe("span=x&order=asc&model=a&model=b");
     expect(applyPatch(next, { order: "desc", filters: { model: [] } }).toString()).toBe("span=x");
+  });
+
+  it("parses and writes the sort, omitting started", () => {
+    expect(parseView(new URLSearchParams("")).sort).toBe("started");
+    expect(parseView(new URLSearchParams("sort=tokens")).sort).toBe("started");
+    expect(parseView(new URLSearchParams("sort=cost&order=asc"))).toMatchObject({
+      sort: "cost",
+      order: "asc",
+    });
+    const next = applyPatch(new URLSearchParams("range=1h"), { sort: "cost", order: "desc" });
+    expect(next.toString()).toBe("range=1h&sort=cost");
+    expect(applyPatch(next, { sort: "started" }).toString()).toBe("range=1h");
+  });
+
+  it("flips the active column, or switches with a first direction per column", () => {
+    const at = (sort: "started" | "name", order: "asc" | "desc") => ({ sort, order });
+    expect(nextSort(at("started", "desc"), "started")).toEqual(at("started", "asc"));
+    expect(nextSort(at("name", "asc"), "name")).toEqual(at("name", "desc"));
+    expect(nextSort(at("started", "asc"), "duration")).toEqual({ sort: "duration", order: "desc" });
+    expect(nextSort(at("started", "desc"), "cost")).toEqual({ sort: "cost", order: "desc" });
+    expect(nextSort(at("started", "desc"), "name")).toEqual({ sort: "name", order: "asc" });
+    expect(nextSort(at("started", "desc"), "source")).toEqual({ sort: "source", order: "asc" });
+    expect(nextSort(at("name", "asc"), "started")).toEqual(at("started", "desc"));
+  });
+
+  it("prepends live traces only when sorted by Started, newest first", () => {
+    expect(prependsLive({ sort: "started", order: "desc" })).toBe(true);
+    expect(prependsLive({ sort: "started", order: "asc" })).toBe(false);
+    expect(prependsLive({ sort: "cost", order: "desc" })).toBe(false);
   });
 
   it("builds sorted, non-empty filter params and range windows", () => {

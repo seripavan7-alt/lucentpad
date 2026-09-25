@@ -65,6 +65,11 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
   `__init__.py` (pytest rootdir mode), so give them unique basenames (`test_sdk_*.py`, `test_agent_*.py`).
 
 ## Milestone history
+### Post-M1 refinements: committed `UI refinements: sidebar filters, sorting, new home page`
+- Filters in the app sidebar (closed by default, custom checkboxes), 24h default range, sort by any column,
+  clock-following static demo, logo links home, new home page (receipt of a reschedule run, embedded
+  dashboard, quick start + full guide, roadmap), sample data gains a `reschedule` support variant.
+
 ### M1 SDK and live waterfall: ✅ approved 2026-09-25, committed `M1: SDK and live waterfall`
 - Rename to LucentPad, logo, landing site + static demo on GitHub Pages (commit `M1 prep`).
 - Traces page: time range, facet filter panel, Input → Output, absolute times, sort, live list.
@@ -87,6 +92,7 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 - Verified: `make check` green; `make dev` up on OrbStack; UI checked in Chrome, no console errors.
 
 ## Known follow-ups (not blocking)
+- Sorting (post-M1): migration `0003_trace_sorts.sql` (`traces.duration_ms` generated column; indexes `traces_{duration,cost,name,source}_idx`). Cursor = base64url JSON `{s,k,id,o,f}` (cost key is a Decimal string); old cursors → 422. A very selective filter + non-started sort walks the sort index (1.7 ms at 200k). Demo adapter cursor `d12.cost.<fp>`. Dashboard keeps previous rows while a new sort/filter loads.
 - While a run is live its trace is named after its first span (e.g. `chat claude-sonnet-5`) until the root span arrives last; fix idea: SDK exports a root "start" marker, or the server falls back to `service.name`.
 - List `since` polls cap at `limit` with no truncated flag; ingest shutdown returns 429 not 503.
 - Trace-summary `models` are sorted alphabetically, not by usage.
@@ -97,6 +103,9 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 ## Decisions log
 | Date | Decision |
 | --- | --- |
+| 2026-09-25 | Landing page (user: "best of the 3 drafts, human, not vibecoded; don't wait for me"): `src/site/home/Home.tsx`: left-aligned hero ("See what your agent actually did.") with **Open the dashboard** + **Get started**; a receipt of one real demo run; C's dark "Open the dashboard. No install, no sign-up." stage with the **real dashboard embedded** (A); A's "Get started in minutes" tabbed quick start with the full guide expandable in place; "Built in the open" milestone list. Drafts removed. Demo links back to the site use `target=_top`. |
+| 2026-09-25 | Traces list sortable by Name, Source, Duration, Cost (plus Started): `sort` param (`started|duration|name|source|cost`) + `order`; ties by trace_id; name/source code-point order (COLLATE "C"). |
+| 2026-09-25 | Post-M1 UI refinements (user): Traces filters moved into the app sidebar under the nav (portal into `Layout`'s slot; inline sheet ≤720px), restyled like the nav; Status/Source open by default, 5 values + "Show N more". **Default range 24h** (was 15m, D13 amended). Static demo follows the viewer's clock on every request (`createLiveDemoFetch`): each range always shows the same traces, whenever and however long it's open. |
 | 2026-09-25 | **M1 "go"** with every recommendation accepted: D11 (a) shift sample-only data on startup + "Show last 24 hours" empty state; D12 filters Name, Status, Source, Client, Model, Service with counts; D13 presets 15m/1h/4h/24h/7d/30d; D3 polling (detail 1 s, list 3 s, `since`); D4 SDK sets `stream_options.include_usage` and hides the usage chunk; D5 `lucentpad-sdk` / `import lucentpad`; D6 previews ≤2 000 chars + truncated flags, `capture_content=False` to disable; D8 absolute time + relative tooltip; D9 `Input → Output` column + inspector blocks; D10 time sort asc/desc in URL. |
 | 2026-09-25 | D1: refund limit **$200**, budget **$0.50 per run** (config in M1, enforced in M3). |
 | 2026-09-25 | D2: demo agent on Anthropic `claude-sonnet-5` → fallback `claude-haiku-4-5`; OpenAI pair `gpt-5` → `gpt-5-mini` also supported. Prices per MTok (in/out), checked 2026-09-25 on the official pages: sonnet-5 2/10, haiku-4-5 1/5, opus-5-5 4/20, gpt-5 1.25/10, gpt-5-mini 0.25/2. Cache pricing not modelled yet. Live key run: decided at the checkpoint (user runs it; mock mode otherwise). |

@@ -8,6 +8,11 @@
   overflow-x: auto;
 }
 
+.tableWrap[data-stale="true"] tbody {
+  opacity: 0.55;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
 .table {
   width: 100%;
   min-width: 900px;
@@ -68,7 +73,7 @@
 }
 
 .colDuration {
-  width: 76px;
+  width: 100px;
 }
 
 .colCalls {
@@ -158,13 +163,34 @@
   font-weight: inherit;
 }
 
+/* Right-aligned (numeric) columns: pull the button to the cell's right edge instead. */
+.sortRight {
+  margin-right: -4px;
+  margin-left: 0;
+}
+
 .sort:hover {
   background: var(--color-surface-hover);
   color: var(--color-text);
 }
 
+/* Only the active column shows its arrow; the others hint at theirs on hover or focus. */
 .sortIcon {
+  flex: none;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.sort:hover .sortIcon,
+.sort:focus-visible .sortIcon {
+  opacity: 0.6;
+}
+
+.sortIcon[data-active="true"],
+.sort:hover .sortIcon[data-active="true"] {
   color: var(--color-accent-text);
+  opacity: 1;
 }
 
 .preview {

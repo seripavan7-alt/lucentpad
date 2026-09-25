@@ -1,0 +1,637 @@
+/*
+ * LucentPad home page. Quiet and specific on purpose: left-aligned copy, one real run shown as
+ * a receipt, the real dashboard embedded in the page, then setup and status. Tokens only;
+ * light and dark follow the viewer's theme.
+ */
+
+.page {
+  --measure: 1120px;
+  --gutter: var(--space-6);
+
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.page main {
+  flex: 1;
+}
+
+/* ---------- Hero ---------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-12) var(--gutter) calc(var(--space-12) + var(--space-4));
+}
+
+.heroText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.title {
+  max-width: 13ch;
+  font-size: clamp(2.25rem, 4.6vw, 3.4rem);
+  font-weight: var(--weight-semibold);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+}
+
+.lede {
+  max-width: 34rem;
+  color: var(--color-text-secondary);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-top: var(--space-1);
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.primary:hover {
+  background: var(--color-accent-hover);
+}
+
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-border-strong);
+  padding-bottom: 1px;
+}
+
+.secondary:hover {
+  border-bottom-color: var(--color-text);
+}
+
+.primary:focus-visible,
+.secondary:focus-visible,
+.textLink:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 3px;
+}
+
+.meta {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+/* ---------- Receipt: one real run ---------- */
+
+.receipt {
+  margin: 0;
+  padding: var(--space-5);
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  font-size: var(--text-xs);
+  /* Slightly tilted, like a slip on a desk; straightens on hover. */
+  transform: rotate(0.6deg);
+  transition: transform 300ms var(--ease);
+  box-shadow: var(--shadow-sm);
+}
+
+.receipt:hover {
+  transform: rotate(0deg);
+}
+
+.receiptHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px dashed var(--color-border-strong);
+}
+
+.receiptLabel {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+}
+
+.receiptOk {
+  color: var(--color-ok);
+  font-family: var(--font-mono);
+}
+
+.said {
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.who {
+  flex: none;
+  width: 64px;
+  padding-top: 2px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.stepList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-top: 1px dashed var(--color-border-strong);
+  border-bottom: 1px dashed var(--color-border-strong);
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.stepRow {
+  display: grid;
+  grid-template-columns: 1fr 72px 48px 52px;
+  align-items: center;
+  gap: var(--space-2);
+  height: 22px;
+}
+
+.stepName {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepRow[data-kind="tool"] .stepName {
+  padding-left: var(--space-3);
+}
+
+.stepBar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-surface-subtle);
+}
+
+.stepBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--kind-llm);
+}
+
+.stepRow[data-kind="tool"] .stepBar i {
+  background: var(--kind-tool);
+}
+
+.stepTime,
+.stepCost {
+  color: var(--color-text-tertiary);
+  text-align: right;
+}
+
+.stepCost {
+  color: var(--color-text);
+}
+
+.receiptTotal {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border-strong);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.receiptTotal strong {
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}
+
+/* ---------- Showcase: the real dashboard, embedded ---------- */
+
+.showcase {
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter) var(--space-4);
+}
+
+.showcaseHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.showcaseHead .sectionTitle {
+  margin: 0;
+}
+
+.textLink {
+  color: var(--color-accent-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.textLink:hover {
+  text-decoration: underline;
+}
+
+.window {
+  overflow: hidden;
+  border: var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: min(620px, 76vh);
+  border: 0;
+}
+
+.caption {
+  margin-top: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* ---------- Sections ---------- */
+
+.section {
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-12) var(--gutter) var(--space-4);
+}
+
+.sectionHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.sectionTitle {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+.sectionText {
+  max-width: 40rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+}
+
+/* ---------- Quick start ---------- */
+
+.quickstart {
+  overflow: hidden;
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border);
+  overflow-x: auto;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--color-text);
+}
+
+.tab[aria-selected="true"] {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.soon {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.tabIntro {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.codeWrap {
+  position: relative;
+}
+
+.code {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  overflow-x: auto;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.75;
+}
+
+.copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+}
+
+.copy:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.fullGuide {
+  border-top: var(--border);
+}
+
+.fullGuide summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  list-style: none;
+}
+
+.fullGuide summary::-webkit-details-marker {
+  display: none;
+}
+
+.fullGuide summary::after {
+  content: "+";
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.fullGuide[open] summary::after {
+  content: "−";
+}
+
+.fullGuide summary:hover {
+  background: var(--color-surface-hover);
+}
+
+.prose {
+  padding: 0 var(--space-5) var(--space-6);
+  font-size: var(--text-md);
+  line-height: 1.65;
+}
+
+.prose h1 {
+  display: none; /* the section already has a title */
+}
+
+.prose h2 {
+  margin: var(--space-6) 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.prose p,
+.prose ul,
+.prose pre,
+.prose blockquote {
+  margin: 0 0 var(--space-3);
+}
+
+.prose ul {
+  padding-left: var(--space-6);
+}
+
+.prose a {
+  color: var(--color-accent-text);
+}
+
+.prose code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: var(--space-4);
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.prose pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+}
+
+.prose blockquote {
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--color-text-tertiary);
+  background: var(--color-surface-subtle);
+}
+
+.prose blockquote p {
+  margin: 0;
+}
+
+/* ---------- Roadmap ---------- */
+
+.roadmap {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.roadmap li {
+  display: grid;
+  grid-template-columns: 16px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border);
+  font-size: var(--text-md);
+}
+
+.mark {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.roadmap li[data-state="done"] .mark {
+  border-color: var(--color-ok);
+  background: var(--color-ok);
+}
+
+.roadmap li[data-state="next"] .mark {
+  border-color: var(--color-accent);
+}
+
+.milestone {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.roadmap li[data-state="later"] .what {
+  color: var(--color-text-secondary);
+}
+
+.state {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.roadmap li[data-state="next"] .state {
+  color: var(--color-accent-text);
+}
+
+/* ---------- Footer ---------- */
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--measure);
+  margin: var(--space-10) auto 0;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+  border-top: var(--border);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.footer a {
+  color: inherit;
+}
+
+/* ---------- Narrow screens ---------- */
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+  }
+
+  .receipt {
+    transform: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .page {
+    --gutter: var(--space-4);
+  }
+
+  .stepRow {
+    grid-template-columns: 1fr 40px 48px 52px;
+  }
+
+  .frame {
+    height: 560px;
+  }
+
+  .roadmap li {
+    grid-template-columns: 16px 32px minmax(0, 1fr);
+  }
+
+  .state {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receipt {
+    transition: none;
+  }
+}

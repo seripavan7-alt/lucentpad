@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -32,6 +33,7 @@ from lucentpad_server.schema import (
     TraceFacets,
     TraceList,
     TraceOrder,
+    TraceSort,
     TraceSummary,
 )
 
@@ -230,22 +232,83 @@ def _where(conditions: list[str]) -> str:
 
 
 class InvalidCursorError(ValueError):
-    """The pagination cursor is malformed, or was issued for another order or filter set."""
+    """The pagination cursor is malformed, or was issued for another sort, order or filter set."""
+
+
+SortKey = datetime | float | Decimal | str
+"""A cursor's sort key value: start_time (datetime), duration_ms (float), cost_usd (Decimal,
+exact like its numeric column) or name / source (str)."""
+
+# ORDER BY expression per sort (every one NOT NULL); name and source compare in byte order.
+_SORT_SQL: Final[dict[TraceSort, str]] = {
+    "started": "start_time",
+    "duration": "duration_ms",
+    "name": 'name COLLATE "C"',
+    "source": 'source COLLATE "C"',
+    "cost": "cost_usd",
+}
+# Result column holding the sort key, and the parameter cast for keyset comparisons.
+_SORT_COLUMN: Final[dict[TraceSort, str]] = {
+    "started": "start_time",
+    "duration": "duration_ms",
+    "name": "name",
+    "source": "source",
+    "cost": "cost_usd",
+}
+_SORT_CAST: Final[dict[TraceSort, str]] = {
+    "started": "timestamptz",
+    "duration": "float8",
+    "name": "text",
+    "source": "text",
+    "cost": "numeric",
+}
+
+
+def _encode_key(key: SortKey) -> str | float:
+    if isinstance(key, datetime):
+        return key.isoformat()
+    if isinstance(key, Decimal):
+        return str(key)
+    return key
+
+
+def _decode_key(sort: TraceSort, raw: object) -> SortKey:
+    """The typed sort key of a cursor; ValueError when it doesn't fit ``sort``."""
+    if sort == "started" and isinstance(raw, str):
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is not None:
+            return parsed
+    elif sort == "duration" and isinstance(raw, int | float) and not isinstance(raw, bool):
+        if math.isfinite(raw):
+            return float(raw)
+    elif sort == "cost" and isinstance(raw, str):
+        try:
+            cost = Decimal(raw)
+        except ArithmeticError:
+            raise ValueError("bad cost key") from None
+        if cost.is_finite():
+            return cost
+    elif sort in ("name", "source") and isinstance(raw, str):
+        return raw
+    raise ValueError("cursor key does not match its sort")
 
 
 @dataclass(frozen=True)
 class Cursor:
-    """Keyset position after the last row of a page, bound to the page's order and filters."""
+    """Keyset position after the last row of a page, bound to the page's sort, order and
+    filters. ``key`` is that row's sort key (see ``SortKey``); ties break on ``trace_id``."""
 
-    start_time: datetime
+    key: SortKey
     trace_id: str
+    sort: TraceSort = "started"
     order: TraceOrder = "desc"
     fingerprint: str = ""
 
     def encode(self) -> str:
         raw = json.dumps(
             {
-                "t": self.start_time.isoformat(),
+                "s": self.sort,
+                "k": _encode_key(self.key),
                 "id": self.trace_id,
                 "o": self.order,
                 "f": self.fingerprint,
@@ -258,20 +321,22 @@ class Cursor:
         try:
             raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
             data = json.loads(raw)
-            start_time = datetime.fromisoformat(data["t"])
+            sort = data["s"]
+            if sort not in _SORT_SQL:
+                raise ValueError("unknown sort")
+            key = _decode_key(sort, data["k"])
             trace_id = data["id"]
-            order = data.get("o", "desc")
-            fingerprint = data.get("f", "")
+            order = data["o"]
+            fingerprint = data["f"]
         except (binascii.Error, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise InvalidCursorError("invalid cursor") from exc
         if (
-            start_time.tzinfo is None
-            or not isinstance(trace_id, str)
+            not isinstance(trace_id, str)
             or order not in ("desc", "asc")
             or not isinstance(fingerprint, str)
         ):
             raise InvalidCursorError("invalid cursor")
-        return cls(start_time, trace_id, order, fingerprint)
+        return cls(key, trace_id, sort, order, fingerprint)
 
 
 def _int_attr(attrs: Attributes, key: str) -> int | None:
@@ -464,43 +529,49 @@ class SpanStore:
         *,
         limit: int,
         cursor: str | None = None,
+        sort: TraceSort = "started",
         order: TraceOrder = "desc",
         since: datetime | None = None,
     ) -> TraceList:
-        """One page of traces in ``order`` plus the next cursor. Raises ``InvalidCursorError``
-        for a cursor from another order or filter set.
+        """One page of traces sorted by ``sort`` in ``order`` (ties on ``trace_id``, same
+        direction) plus the next cursor. Raises ``InvalidCursorError`` for a cursor from another
+        sort, order or filter set.
 
         With ``since`` (live polling): only traces updated after ``since - LIVE_OVERLAP``, at
-        most ``limit`` of them in ``order``, and never a next cursor.
+        most ``limit`` of them in the requested sort, and never a next cursor.
         """
         fingerprint = filters.fingerprint()
         after = Cursor.decode(cursor) if cursor is not None else None
-        if after is not None and (after.order != order or after.fingerprint != fingerprint):
-            raise InvalidCursorError("cursor was issued for another order or filter set")
+        if after is not None and (
+            after.sort != sort or after.order != order or after.fingerprint != fingerprint
+        ):
+            raise InvalidCursorError("cursor was issued for another sort, order or filter set")
         args: list[Any] = []
         where = _filter_sql(filters, args)
         if since is not None:
             args.append(since - LIVE_OVERLAP)
             where.append(f"updated_at > ${len(args)}")
+        key_sql, key_column = _SORT_SQL[sort], _SORT_COLUMN[sort]
         cmp, direction = (">", "ASC") if order == "asc" else ("<", "DESC")
         if after is not None:
-            args += [after.start_time, after.trace_id]
-            where.append(f"(start_time, trace_id) {cmp} (${len(args) - 1}, ${len(args)})")
+            args += [after.key, after.trace_id]
+            where.append(
+                f"({key_sql}, trace_id) {cmp} (${len(args) - 1}::{_SORT_CAST[sort]}, ${len(args)})"
+            )
         args.append(limit + 1)
         sql = (
-            f"SELECT {_SUMMARY_COLUMNS}, now() AS as_of FROM traces"  # noqa: S608 - fixed fragments
+            f"SELECT {_SUMMARY_COLUMNS}, duration_ms, now() AS as_of FROM traces"  # noqa: S608 - fixed fragments
             + _where(where)
-            + f" ORDER BY start_time {direction}, trace_id {direction} LIMIT ${len(args)}"
+            + f" ORDER BY {key_sql} {direction}, trace_id {direction} LIMIT ${len(args)}"
         )
         async with self._pool.acquire() as conn:
             rows: Sequence[asyncpg.Record] = await conn.fetch(sql, *args)
             as_of: datetime = rows[0]["as_of"] if rows else await conn.fetchval("SELECT now()")
         page = [_summary(r) for r in rows[:limit]]
-        next_cursor = (
-            Cursor(rows[limit - 1]["start_time"], rows[limit - 1]["trace_id"], order, fingerprint)
-            if len(rows) > limit and since is None
-            else None
-        )
+        next_cursor = None
+        if len(rows) > limit and since is None:
+            last = rows[limit - 1]
+            next_cursor = Cursor(last[key_column], last["trace_id"], sort, order, fingerprint)
         return TraceList(
             traces=page,
             next_cursor=next_cursor.encode() if next_cursor is not None else None,

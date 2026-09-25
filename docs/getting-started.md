@@ -29,7 +29,7 @@ runs and Claude Code / Copilot sessions, including errors, a guardrail block and
 
 ## 2. Find your way around the dashboard
 
-- **Traces** lists every run (last 15 minutes by default; pick a range top right). Filter by name,
+- **Traces** lists every run (last 24 hours by default; pick a range top right). Filter by name,
   status, source, client, model and service on the left; new runs appear live.
 - **Trace detail** shows the waterfall: every model call and tool step on one time axis, drawing live
   while the run is going, with the cost of each model call. Click a span to see its tokens, cost,

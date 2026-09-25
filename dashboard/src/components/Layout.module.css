@@ -19,7 +19,19 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  color: inherit;
   font-size: var(--text-md);
+  text-decoration: none;
+}
+
+.brand:hover {
+  background: var(--color-surface-hover);
+}
+
+.brand:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .nav {
@@ -70,6 +82,20 @@
   font-size: var(--text-2xs);
   color: var(--color-text-tertiary);
   font-feature-settings: var(--font-features-numeric);
+}
+
+/* Page-specific sidebar content (e.g. the Traces filters); scrolls on its own. */
+.slot {
+  flex: 1;
+  min-height: 0;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.slot:empty {
+  display: none;
 }
 
 .footer {
@@ -159,7 +185,8 @@
   }
 
   .milestone,
-  .apiStatus {
+  .apiStatus,
+  .slot {
     display: none;
   }
 }

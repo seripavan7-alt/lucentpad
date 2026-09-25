@@ -120,3 +120,44 @@ export const CopyIcon = (p: IconProps) => (
     <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
   </Icon>
 );
+
+/* Filter facets (sidebar). */
+export const TagIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 3.5v4l6 6 5-5-6-6h-4a1 1 0 0 0-1 1Z" />
+    <circle cx="5.5" cy="5.5" r="0.75" />
+  </Icon>
+);
+
+export const StatusIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="5.5" />
+    <circle cx="8" cy="8" r="2" />
+  </Icon>
+);
+
+export const SourceIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.5a3.5 3.5 0 0 1-7 0V5.5ZM8 11.5v2" />
+  </Icon>
+);
+
+export const ClientIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="m5 7 1.75 1.5L5 10M8.5 10h2.5" />
+  </Icon>
+);
+
+export const ModelIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="4" width="8" height="8" rx="1.5" />
+    <path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2" />
+  </Icon>
+);
+
+export const ServiceIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m8 2 5.5 3v6L8 14l-5.5-3V5L8 2ZM2.5 5 8 8l5.5-3M8 8v6" />
+  </Icon>
+);

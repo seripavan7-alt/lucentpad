@@ -754,6 +754,25 @@
             }
           },
           {
+            "description": "Sort key; `order` sets the direction. The cursor encodes both.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "started",
+              "description": "Sort key; `order` sets the direction. The cursor encodes both.",
+              "enum": [
+                "started",
+                "duration",
+                "name",
+                "source",
+                "cost"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
             "in": "query",
             "name": "order",
             "required": false,

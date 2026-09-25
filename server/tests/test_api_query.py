@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -288,3 +288,89 @@ async def test_facet_counts_equal_list_totals(
         for fv in getattr(facets, facet):
             query = {**_iso(params), facet: fv.value}
             assert len(await _all_pages(client, limit=200, **query)) == fv.count, (facet, fv)
+
+
+# --------------------------------------------------------------------------- sorts
+
+_SORT_KEYS: dict[str, Callable[[TraceSummary], Any]] = {
+    "started": lambda t: t.start_time,
+    "duration": lambda t: t.duration_ms,
+    "name": lambda t: t.name.encode(),  # byte order == code point order (COLLATE "C")
+    "source": lambda t: t.source,
+    "cost": lambda t: t.cost_usd,
+}
+
+
+@pytest.mark.parametrize("order", ["desc", "asc"])
+@pytest.mark.parametrize("sort", list(_SORT_KEYS))
+@pytest.mark.parametrize(
+    ("params", "limit"),
+    [
+        ({}, 200),
+        ({}, 9),
+        ({"status": ["error", "blocked"], "source": "sdk"}, 4),
+        ({"from": NOW - timedelta(days=4), "to": NOW - timedelta(days=1), "model": "gpt-5"}, 5),
+    ],
+)
+async def test_sort_orders_and_pages(
+    client: httpx.AsyncClient,
+    everything: list[TraceSummary],
+    sort: str,
+    order: str,
+    params: dict[str, Any],
+    limit: int,
+) -> None:
+    got = await _all_pages(client, limit=limit, sort=sort, order=order, **_iso(params))
+    key = _SORT_KEYS[sort]
+    expected = sorted(
+        (t for t in everything if _matches(t, params)),
+        key=lambda t: (key(t), t.trace_id),
+        reverse=order == "desc",
+    )
+    assert expected
+    assert [t.trace_id for t in got] == [t.trace_id for t in expected]
+
+
+async def test_sort_default_is_started(client: httpx.AsyncClient) -> None:
+    a = (await client.get("/v1/traces", params={"limit": 20})).json()["traces"]
+    b = (await client.get("/v1/traces", params={"limit": 20, "sort": "started"})).json()["traces"]
+    assert a == b
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ({"sort": "name"}, {"sort": "source"}),
+        ({"sort": "cost"}, {}),
+        ({}, {"sort": "duration"}),
+        ({"sort": "duration", "order": "asc"}, {"sort": "duration", "order": "desc"}),
+        ({"sort": "name", "status": "ok"}, {"sort": "name", "status": "error"}),
+    ],
+)
+async def test_cursor_bound_to_sort(
+    client: httpx.AsyncClient, first: dict[str, Any], second: dict[str, Any]
+) -> None:
+    cursor = (await client.get("/v1/traces", params={"limit": 3, **first})).json()["next_cursor"]
+    assert cursor is not None
+    ok = await client.get("/v1/traces", params={"limit": 3, **first, "cursor": cursor})
+    assert ok.status_code == 200
+    bad = await client.get("/v1/traces", params={"limit": 3, **second, "cursor": cursor})
+    assert bad.status_code == 422
+    assert bad.json()["detail"][0]["loc"] == ["query", "cursor"]
+
+
+async def test_sort_with_since(client: httpx.AsyncClient, everything: list[TraceSummary]) -> None:
+    # Every sample trace was stored during this test module, so a since an hour back sees all.
+    since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    r = await client.get(
+        "/v1/traces", params={"since": since, "sort": "cost", "order": "asc", "limit": 200}
+    )
+    assert r.status_code == 200, r.text
+    page = TraceList.model_validate(r.json())
+    assert page.next_cursor is None
+    expected = sorted(everything, key=lambda t: (t.cost_usd, t.trace_id))[:200]
+    assert [t.trace_id for t in page.traces] == [t.trace_id for t in expected]
+
+
+async def test_bad_sort(client: httpx.AsyncClient) -> None:
+    assert (await client.get("/v1/traces", params={"sort": "tokens"})).status_code == 422

@@ -24,6 +24,16 @@ export type GetTraceParams = NonNullable<
   operations["get_trace_v1_traces__trace_id__get"]["parameters"]["query"]
 >;
 export type TraceOrder = NonNullable<ListTracesParams["order"]>;
+export type TraceSort = NonNullable<ListTracesParams["sort"]>;
+
+/** Every sort key; mirrors `TraceSort` in server/lucentpad_server/schema.py. */
+export const TRACE_SORTS = [
+  "started",
+  "duration",
+  "name",
+  "source",
+  "cost",
+] as const satisfies readonly TraceSort[];
 
 /** Facet (and filter) names in display order; mirrors `FACETS` in server/lucentpad_server/query.py. */
 export const FACETS = [

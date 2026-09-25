@@ -1,8 +1,6 @@
 /* Filter panel beside the table, inside the content area (the app's nav sidebar is separate). */
 .layout {
-  display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
-  align-items: start;
+  min-width: 0;
 }
 
 .body {
@@ -53,7 +51,7 @@
 
 /* Only narrow screens collapse the panel behind this button. */
 .filtersButton {
-  display: none;
+  display: inline-flex;
 }
 
 .filtersCount {
@@ -63,25 +61,6 @@
   color: var(--color-accent-text);
   font-size: var(--text-2xs);
   font-feature-settings: var(--font-features-numeric);
-}
-
-@media (max-width: 960px) {
-  .filtersButton {
-    display: inline-flex;
-  }
-
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .layout > aside[data-open="false"] {
-    display: none;
-  }
-
-  .layout > aside[data-open="true"] {
-    border-right: 0;
-    border-bottom: var(--border);
-  }
 }
 
 .emptyActions {

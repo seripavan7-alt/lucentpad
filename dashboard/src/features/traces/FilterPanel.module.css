@@ -1,88 +1,126 @@
+/*
+ * Traces filters, in the app sidebar under the nav (Layout's slot). Built on the nav's grid so
+ * it reads as part of the sidebar, not a panel on top of it:
+ *   - rows are 8px padded; a 16px icon + 8px gap puts every text at 32px from the edge,
+ *     the same line as "Traces", "Costs", ...
+ *   - everything on the right (counts, the selection chip, the chevron) ends 8px from the
+ *     edge, the same line as the nav's M2/M3 tags.
+ * On narrow screens the same panel opens inline under the page header.
+ */
 .panel {
+  --row-pad: var(--space-2); /* 8px, like .navItem */
+  --text-inset: calc(var(--row-pad) + 16px + var(--space-2)); /* 32px: nav label line */
+
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-3) var(--space-8) var(--space-6);
-  border-right: var(--border);
-  font-size: var(--text-xs);
+  gap: 1px;
+  padding: var(--space-5) 0 var(--space-4);
   min-width: 0;
-  /* Stays in view below the page header while the table scrolls. */
-  position: sticky;
-  top: 48px;
-  max-height: calc(100dvh - 48px);
-  overflow-y: auto;
+  font-size: var(--text-sm);
 }
 
-@media (max-width: 960px) {
-  .panel {
-    position: static;
-    max-height: none;
-    padding-bottom: var(--space-3);
-  }
+/* Inline (narrow screens): a sheet under the header instead of a sidebar section. */
+main .panel {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-bottom: var(--border);
+  background: var(--color-sidebar);
 }
+
+/* ---------- Section heading ---------- */
 
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  min-height: 24px;
-  padding-bottom: var(--space-1);
+  height: 24px;
+  padding: 0 var(--row-pad);
 }
 
 .heading {
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
 }
 
 .textButton {
-  padding: 0 var(--space-1);
+  margin-right: -4px;
+  padding: 2px 4px;
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--color-accent-text);
+  color: var(--color-text-tertiary);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .textButton:hover {
-  text-decoration: underline;
+  color: var(--color-text);
 }
 
 .note {
-  padding: var(--space-1) 0;
+  padding: 4px var(--row-pad) 4px var(--text-inset);
   color: var(--color-text-tertiary);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
 }
 
+/* ---------- Facet group row (looks like a nav item) ---------- */
+
 .group {
-  padding: var(--space-2) 0;
-  border-top: var(--border);
+  display: flex;
+  flex-direction: column;
 }
 
 .groupHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  position: relative;
 }
 
 .groupToggle {
-  display: inline-flex;
-  flex: 1;
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  height: 22px;
-  padding: 0;
+  gap: var(--space-2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--row-pad);
   border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--color-text);
-  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font: inherit;
   font-weight: var(--weight-medium);
   text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.groupToggle:hover,
+.groupToggle[aria-expanded="true"] {
+  color: var(--color-text);
+}
+
+.groupToggle:hover {
+  background: var(--color-surface-hover);
+}
+
+.groupToggle:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.groupIcon {
+  flex: none;
+  color: var(--color-text-tertiary);
+}
+
+.groupLabel {
+  flex: 1;
+  min-width: 0;
 }
 
 .chevron {
@@ -95,30 +133,57 @@
   transform: rotate(-90deg);
 }
 
-.badge {
-  padding: 0 5px;
+/* Selected count + clear: sits just left of the chevron. */
+.clearChip {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--row-pad) + 12px + 6px);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  padding: 0 4px 0 6px;
+  border: 0;
   border-radius: var(--radius-full);
   background: var(--color-accent-subtle);
   color: var(--color-accent-text);
   font-size: var(--text-2xs);
-  font-feature-settings: var(--font-features-numeric);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  transform: translateY(-50%);
+  cursor: pointer;
 }
+
+.clearChip:hover {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+/* ---------- Values ---------- */
 
 .groupBody {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding-top: var(--space-1);
+  gap: 1px;
+  padding: 1px 0 var(--space-2);
 }
 
 .search {
-  width: 100%;
+  width: calc(100% - var(--text-inset) - var(--row-pad));
   height: 26px;
+  margin: 2px var(--row-pad) 3px var(--text-inset);
   padding: 0 var(--space-2);
-  border: var(--border-strong);
+  border: var(--border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  color: var(--color-text);
   font-size: var(--text-xs);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
 }
 
 .search::placeholder {
@@ -128,19 +193,29 @@
 .values {
   display: flex;
   flex-direction: column;
-  max-height: 240px;
-  overflow-y: auto;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .value {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  height: 26px;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
+  height: 28px;
+  /* The checkbox sits in the icon column (under the group's icon), so the value text lands on
+     the same line as the group name and nothing is wasted on the left. */
+  gap: calc(var(--space-2) + 2px);
+  padding: 0 var(--row-pad) 0 calc(var(--row-pad) + 1px);
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
   cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
 }
 
 .value:hover {
@@ -149,15 +224,77 @@
 }
 
 .value[data-checked="true"] {
+  background: var(--color-accent-subtle);
   color: var(--color-text);
+  font-weight: var(--weight-medium);
 }
 
+.value[data-checked="true"]:hover {
+  background: color-mix(in srgb, var(--color-accent-subtle) 70%, var(--color-accent) 12%);
+}
+
+/* Native checkbox kept for semantics and keyboard; the drawn box sits on top of it. */
 .checkbox {
-  flex: none;
-  width: 13px;
-  height: 13px;
+  position: absolute;
+  left: calc(var(--row-pad) + 1px);
+  width: 14px;
+  height: 14px;
   margin: 0;
-  accent-color: var(--color-accent);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.box {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 5px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 1px rgb(16 18 24 / 6%);
+  transition:
+    background 160ms var(--ease),
+    border-color 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+
+.box svg {
+  fill: none;
+  stroke: var(--color-text-inverse);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The check draws itself in when ticked. */
+.box path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 200ms var(--ease) 40ms;
+}
+
+.value:hover .box {
+  border-color: var(--color-text-tertiary);
+}
+
+.checkbox:checked + .box {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  box-shadow: 0 1px 2px rgb(94 106 210 / 35%);
+}
+
+.checkbox:checked + .box path {
+  stroke-dashoffset: 0;
+}
+
+.value:active .box {
+  transform: scale(0.9);
+}
+
+.checkbox:focus-visible + .box {
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
 .valueText {
@@ -170,6 +307,36 @@
 
 .count {
   flex: none;
+  min-width: 2ch;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  text-align: right;
+}
+
+.value[data-checked="true"] .count {
+  color: var(--color-accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .box,
+  .box path {
+    transition: none;
+  }
+}
+
+.more {
+  align-self: flex-start;
+  margin-left: calc(var(--text-inset) - 4px); /* under the value text */
+  padding: 3px 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
   color: var(--color-text-tertiary);
   font-size: var(--text-2xs);
+  cursor: pointer;
+}
+
+.more:hover {
+  color: var(--color-text);
 }

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Link, useNavigate } from "react-router";
-import type { TraceOrder, TraceSummary } from "../../api/types";
+import type { TraceOrder, TraceSort, TraceSummary } from "../../api/types";
 import { ArrowDownIcon, ArrowUpIcon } from "../../components/icons";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -15,13 +15,18 @@ import {
 } from "../../lib/format";
 import { useNow } from "../../lib/useNow";
 import styles from "./TracesTable.module.css";
+import { FIRST_ORDER } from "./view";
 
 interface TracesTableProps {
   traces: TraceSummary[];
+  sort: TraceSort;
   order: TraceOrder;
-  onToggleOrder: () => void;
+  /** A sortable header was clicked (the caller flips or switches; see `nextSort`). */
+  onSort: (column: TraceSort) => void;
   /** Trace ids that just arrived by live polling (briefly highlighted). */
   fresh?: ReadonlySet<string>;
+  /** The rows are the previous view's, shown while a new sort or filter loads. */
+  stale?: boolean;
 }
 
 function scrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -54,61 +59,122 @@ function useScrollAnchor(tbody: RefObject<HTMLTableSectionElement | null>, first
   }, [tbody, firstId]);
 }
 
-export function TracesTable({ traces, order, onToggleOrder, fresh }: TracesTableProps) {
+/** What each direction means per column, for the header's tooltip. */
+const SORT_PHRASES: Record<TraceSort, Record<TraceOrder, string>> = {
+  started: { desc: "Newest first", asc: "Oldest first" },
+  duration: { desc: "Longest first", asc: "Shortest first" },
+  cost: { desc: "Most expensive first", asc: "Cheapest first" },
+  name: { asc: "Name A→Z", desc: "Name Z→A" },
+  source: { asc: "Source A→Z", desc: "Source Z→A" },
+};
+
+interface SortHeaderProps {
+  column: TraceSort;
+  label: string;
+  className: string | undefined;
+  /** Right-aligned (numeric) column: the arrow goes before the label so labels line up. */
+  right?: boolean;
+  sort: TraceSort;
+  order: TraceOrder;
+  onSort: (column: TraceSort) => void;
+}
+
+function SortHeader({ column, label, className, right, sort, order, onSort }: SortHeaderProps) {
+  const active = sort === column;
+  // Inactive columns preview the direction a first click would sort in.
+  const shown = active ? order : FIRST_ORDER[column];
+  const Icon = shown === "desc" ? ArrowDownIcon : ArrowUpIcon;
+  const phrases = SORT_PHRASES[column];
+  const title = active
+    ? `${phrases[order]}; click for ${phrases[order === "desc" ? "asc" : "desc"].toLowerCase()}`
+    : `Sort: ${phrases[shown].toLowerCase()}`;
+  const icon = (
+    <Icon
+      width={12}
+      height={12}
+      className={styles.sortIcon}
+      data-active={active ? "true" : undefined}
+      aria-hidden="true"
+    />
+  );
+  return (
+    <th
+      scope="col"
+      className={`${right ? (styles.right ?? "") : ""} ${className ?? ""}`}
+      aria-sort={active ? (order === "desc" ? "descending" : "ascending") : undefined}
+    >
+      <button
+        type="button"
+        className={`${styles.sort ?? ""} ${right ? (styles.sortRight ?? "") : ""}`}
+        data-active={active ? "true" : undefined}
+        onClick={() => {
+          onSort(column);
+        }}
+        title={title}
+      >
+        {right && icon}
+        {label}
+        {!right && icon}
+      </button>
+    </th>
+  );
+}
+
+export function TracesTable({ traces, sort, order, onSort, fresh, stale }: TracesTableProps) {
   const navigate = useNavigate();
   const now = useNow();
   const tbody = useRef<HTMLTableSectionElement>(null);
   useScrollAnchor(tbody, traces[0]?.trace_id ?? "");
-  const SortIcon = order === "desc" ? ArrowDownIcon : ArrowUpIcon;
+  const sortProps = { sort, order, onSort };
 
   return (
-    <div className={styles.tableWrap}>
+    <div
+      className={styles.tableWrap}
+      aria-busy={stale ? "true" : undefined}
+      data-stale={stale ? "true" : undefined}
+    >
       <table className={styles.table}>
         <thead>
           <tr>
-            <th scope="col" className={styles.colName}>
-              Name
-            </th>
-            <th scope="col" className={styles.colSource}>
-              Source
-            </th>
+            <SortHeader column="name" label="Name" className={styles.colName} {...sortProps} />
+            <SortHeader
+              column="source"
+              label="Source"
+              className={styles.colSource}
+              {...sortProps}
+            />
             <th scope="col" className={styles.colStatus}>
               Status
             </th>
-            <th
-              scope="col"
+            <SortHeader
+              column="started"
+              label="Started"
               className={styles.colStarted}
-              aria-sort={order === "desc" ? "descending" : "ascending"}
-            >
-              <button
-                type="button"
-                className={styles.sort}
-                onClick={onToggleOrder}
-                title={
-                  order === "desc"
-                    ? "Newest first; click for oldest first"
-                    : "Oldest first; click for newest first"
-                }
-              >
-                Started
-                <SortIcon width={12} height={12} className={styles.sortIcon} />
-              </button>
-            </th>
+              {...sortProps}
+            />
             <th scope="col" className={styles.colPreview}>
               Input → Output
             </th>
-            <th scope="col" className={`${styles.right} ${styles.colDuration}`}>
-              Duration
-            </th>
+            <SortHeader
+              column="duration"
+              label="Duration"
+              className={styles.colDuration}
+              right
+              {...sortProps}
+            />
             <th scope="col" className={`${styles.right} ${styles.optional} ${styles.colCalls}`}>
               LLM calls
             </th>
             <th scope="col" className={`${styles.right} ${styles.colTokens}`}>
               Tokens in / out
             </th>
-            <th scope="col" className={`${styles.right} ${styles.colCost}`}>
-              Cost
-            </th>
+            <SortHeader
+              column="cost"
+              label="Cost"
+              className={styles.colCost}
+              right
+              {...sortProps}
+            />
             <th scope="col" className={`${styles.optional} ${styles.colModels}`}>
               Models
             </th>

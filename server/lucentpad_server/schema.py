@@ -86,7 +86,10 @@ tool: a ``@span`` step. guardrail: a blocked request, recorded as its own span."
 SpanStatus = Literal["ok", "error", "blocked"]
 SpanSource = Literal["sdk", "gateway"]
 TraceOrder = Literal["desc", "asc"]
-"""Traces list order by (start_time, trace_id): newest first (default) or oldest first."""
+"""Direction of the traces list sort: descending (default) or ascending."""
+TraceSort = Literal["started", "duration", "name", "source", "cost"]
+"""What the traces list sorts by: start time (default), duration, trace name, source or cost.
+Ties break on ``trace_id`` in the same direction, so paging is stable."""
 
 
 class _Model(BaseModel):

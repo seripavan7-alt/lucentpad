@@ -12,9 +12,11 @@ import type {
   TraceDetail,
   TraceFacets,
   TraceList,
+  TraceOrder,
+  TraceSort,
   TraceSummary,
 } from "../api/types";
-import { FACET_MAX_VALUES, FACETS, SPAN_SOURCES, SPAN_STATUSES } from "../api/types";
+import { FACET_MAX_VALUES, FACETS, SPAN_SOURCES, SPAN_STATUSES, TRACE_SORTS } from "../api/types";
 
 export interface DemoSnapshot {
   generated_at: string;
@@ -153,19 +155,66 @@ function fingerprint(filter: Filter): string {
   return (h >>> 0).toString(36);
 }
 
+/** Plain code-point order, like Postgres `COLLATE "C"` (JS `<` compares UTF-16 units). */
+export function compareCodePoints(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i) ?? 0;
+    const y = b.codePointAt(j) ?? 0;
+    if (x !== y) return x - y;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return i < a.length ? 1 : j < b.length ? -1 : 0;
+}
+
+/**
+ * Ascending comparators per sort key, ties on trace_id. "started" is not here: the snapshot is
+ * already in the API's started order, which keeps the microseconds `Date.parse` would drop.
+ */
+const SORT_KEYS: Record<
+  Exclude<TraceSort, "started">,
+  (a: TraceSummary, b: TraceSummary) => number
+> = {
+  duration: (a, b) => a.duration_ms - b.duration_ms,
+  cost: (a, b) => a.cost_usd - b.cost_usd,
+  name: (a, b) => compareCodePoints(a.name, b.name),
+  source: (a, b) => compareCodePoints(a.source, b.source),
+};
+
 const compareValues = (a: FacetValue, b: FacetValue): number =>
   b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
 
 /**
  * A fetch-compatible function over the snapshot (see `setFetcher` in api/client.ts).
  * Cursors are the adapter's own: order letter, the position of the page's last trace in the
- * snapshot, and the filter fingerprint (`d12.abc`); reusing one with another order or filter
- * set is a 422, like the API.
+ * sorted list, the sort key and the filter fingerprint (`d12.cost.abc`); reusing one with
+ * another sort, order or filter set is a 422, like the API.
  */
 export function createDemoFetch(snapshot: DemoSnapshot) {
   // The snapshot's traces are already in the API's order: start_time desc, trace_id desc.
   // Oldest first (asc) is exactly the reverse.
   const traces = snapshot.traces;
+  const sorted = new Map<string, TraceSummary[]>();
+  /** Traces in the API's order for a sort and direction (ties on trace_id, same direction). */
+  function orderedBy(sort: TraceSort, order: TraceOrder): TraceSummary[] {
+    const key = `${sort}.${order}`;
+    let list = sorted.get(key);
+    if (!list) {
+      if (sort === "started") {
+        list = order === "desc" ? traces : [...traces].reverse();
+      } else {
+        const compare = SORT_KEYS[sort];
+        const sign = order === "desc" ? -1 : 1;
+        list = [...traces].sort(
+          (a, b) => sign * (compare(a, b) || compareCodePoints(a.trace_id, b.trace_id)),
+        );
+      }
+      sorted.set(key, list);
+    }
+    return list;
+  }
   const byId = new Map(traces.map((t) => [t.trace_id, t]));
   const traceEnd = (t: TraceSummary): number => Date.parse(t.start_time) + t.duration_ms;
 
@@ -177,6 +226,9 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     }
     const order = params.get("order") ?? "desc";
     if (order !== "desc" && order !== "asc") return invalid("order", "order must be desc or asc");
+    const rawSort = params.get("sort") ?? "started";
+    const sort = TRACE_SORTS.find((s) => s === rawSort);
+    if (sort === undefined) return invalid("sort", `sort must be one of ${TRACE_SORTS.join(", ")}`);
     const filter = parseFilter(params);
     // Live polling: the snapshot never changes, so "gained spans after `since`" means the
     // trace ended after it (spans are exported when they end).
@@ -188,14 +240,14 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     const fp = fingerprint(filter);
     let after = -1;
     if (rawCursor !== null) {
-      const match = /^([da])([0-9]+)\.([0-9a-z]+)$/.exec(rawCursor);
-      if (!match || match[1] !== order[0] || match[3] !== fp) {
-        return invalid("cursor", "invalid cursor for this order and filter set");
+      const match = /^([da])([0-9]+)\.([a-z]+)\.([0-9a-z]+)$/.exec(rawCursor);
+      if (!match || match[1] !== order[0] || match[3] !== sort || match[4] !== fp) {
+        return invalid("cursor", "invalid cursor for this sort, order and filter set");
       }
       after = Number(match[2]);
     }
 
-    const ordered = order === "desc" ? traces : [...traces].reverse();
+    const ordered = orderedBy(sort, order);
     const page: TraceSummary[] = [];
     let lastIndex = -1;
     let hasNext = false;
@@ -212,7 +264,7 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     }
     const body: TraceList = {
       traces: page,
-      next_cursor: hasNext ? `${order[0]}${lastIndex}.${fp}` : null,
+      next_cursor: hasNext ? `${order[0]}${lastIndex}.${sort}.${fp}` : null,
       as_of: new Date().toISOString(),
     };
     return json(body);
@@ -262,5 +314,76 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
       throw err;
     }
     return json({ detail: "Not Found" }, 404);
+  };
+}
+
+/**
+ * The demo's "API" as the dashboard sees it: the snapshot re-anchored to the viewer's clock on
+ * every request, so the newest trace always ended a minute ago. Each time range therefore always
+ * shows the same traces, whenever the page is opened and however long it stays open.
+ *
+ * Wraps `createDemoFetch` (which answers in the snapshot's own time): request times (`from`,
+ * `to`, `since`) are moved back by the current shift, response times forward. A paging cursor
+ * carries the shift it was issued with, so later pages use the same one and stay consistent.
+ */
+export function createLiveDemoFetch(snapshot: DemoSnapshot, now: () => number = Date.now) {
+  const inner = createDemoFetch(snapshot);
+  const anchor = freshShift(snapshot, 0); // shift = now() + anchor
+
+  const move = (iso: string, ms: number) => shiftTime(iso, ms);
+  const moveSpan = (s: Span, ms: number): Span => ({
+    ...s,
+    start_time: move(s.start_time, ms),
+    end_time: move(s.end_time, ms),
+    events: s.events?.map((e) => ({ ...e, time: move(e.time, ms) })),
+  });
+  const moveTrace = (t: TraceSummary, ms: number): TraceSummary => ({
+    ...t,
+    start_time: move(t.start_time, ms),
+  });
+
+  return async function liveDemoFetch(url: string): Promise<Response> {
+    const parsed = new URL(url, "http://demo.invalid");
+    const params = parsed.searchParams;
+    let shift = Math.round(now() + anchor);
+    const cursor = params.get("cursor");
+    if (cursor !== null) {
+      const at = cursor.lastIndexOf("~");
+      const carried = at >= 0 ? Number(cursor.slice(at + 1)) : NaN;
+      if (Number.isInteger(carried)) {
+        shift = carried;
+        params.set("cursor", cursor.slice(0, at));
+      }
+    }
+    for (const name of ["from", "to", "since"]) {
+      const raw = params.get(name);
+      const t = raw === null ? NaN : Date.parse(raw);
+      // Leave malformed values alone so the inner adapter rejects them like the API does.
+      if (raw !== null && /(Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim()) && !Number.isNaN(t)) {
+        params.set(name, new Date(t - shift).toISOString());
+      }
+    }
+    const res = await inner(`${parsed.pathname}${parsed.search}`);
+    if (!res.ok) return res;
+
+    const body = (await res.json()) as Record<string, unknown>;
+    const asOf = new Date(now()).toISOString();
+    if (Array.isArray(body.traces)) {
+      const list = body as unknown as TraceList;
+      return json({
+        traces: list.traces.map((t) => moveTrace(t, shift)),
+        next_cursor: list.next_cursor === null ? null : `${list.next_cursor}~${shift}`,
+        as_of: asOf,
+      } satisfies TraceList);
+    }
+    if (body.trace !== undefined && Array.isArray(body.spans)) {
+      const detail = body as unknown as TraceDetail;
+      return json({
+        trace: moveTrace(detail.trace, shift),
+        spans: detail.spans.map((s) => moveSpan(s, shift)),
+        as_of: asOf,
+      } satisfies TraceDetail);
+    }
+    return json(body); // facets and health carry no times
   };
 }
