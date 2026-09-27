@@ -1,12 +1,12 @@
 # LucentPad status
 
-**New agent? Read `CLAUDE.md` first, then this file, then `docs/handoff/M2.md` (M1.md is history).**
+**New agent? Read `CLAUDE.md` first, then this file, then `docs/handoff/M3.md` (M1/M2 are history).**
 Source of truth: `docs/PRD.md`. Process: plan → "go" → build → checkpoint → "approved" → commit `M<n>: <title>`.
 
 ## Now
-- **Milestone:** M2 ✅ approved 2026-09-27, committed `M2: Gateway`. **Next: M3** (guardrails, budgets, Costs, Guardrails, Evals pages, `lucentpad eval`); plan not written yet.
+- **Milestone:** M3 Guardrails, costs, evals. **Plan drafted** in `docs/handoff/M3.md`; waiting for the user's step-0 answers (D20–D28) and "go".
 - **Live:** repo https://github.com/seripavan7-alt/lucentpad · site https://seripavan7-alt.github.io/lucentpad/
-- **Next action:** write `docs/handoff/M3.md` and get the user's "go". Open action items below.
+- **Next action:** get D20–D28 answered, then M3 step 1 (contract).
 - **Blockers:** none.
 
 ## M2 step log
