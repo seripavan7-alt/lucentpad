@@ -194,7 +194,10 @@ async def test_demo_snapshot_matches_api(db_url: str) -> None:
     pool = await db.create_pool(db_url)
     try:
         await db.migrate(pool)
-        await SpanStore(pool).insert_spans(sample.generate(NOW))
+        await SpanStore(pool).insert_spans(sample.generate(NOW), sample=True)
+        # Keep the sample at NOW: without this the app's startup would shift it to the
+        # current time (D11), and the snapshot would change on every run.
+        await pool.execute("INSERT INTO lucentpad_meta (key, value) VALUES ('real_data_at', 'x')")
     finally:
         await pool.close()
     async with app_client(create_app(db_url, seed_sample=False)) as client:

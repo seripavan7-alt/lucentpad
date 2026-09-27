@@ -22,6 +22,7 @@ from lucentpad_server.ingest.queue import InProcessSpanQueue, queue_max_from_env
 from lucentpad_server.ingest.writer import QueuedIngest, drain_timeout_from_env
 from lucentpad_server.query import TraceFilter
 from lucentpad_server.schema import (
+    DataInfo,
     ErrorResponse,
     GatewayProvider,
     GatewaySummary,
@@ -69,6 +70,7 @@ def _trace_filter(
         list[str] | None, Query(description="Matches traces that used any of these models.")
     ] = None,
     service: Annotated[list[str] | None, Query(description="`service.name`.")] = None,
+    hide_sample: Annotated[bool, Query(description="Leave out the startup sample data.")] = False,
 ) -> TraceFilter:
     """The shared filter parameters: OR within a filter, AND across filters."""
     for label, value in (("from", start), ("to", end)):
@@ -83,6 +85,7 @@ def _trace_filter(
         client=tuple(client or ()),
         model=tuple(model or ()),
         service=tuple(service or ()),
+        hide_sample=hide_sample,
     )
 
 
@@ -140,6 +143,11 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/data", tags=["meta"])
+    async def data_info(request: Request) -> DataInfo:
+        """Whether the database holds the startup sample data, real data, or both."""
+        return await get_store(request).data_info()
 
     def get_ingest(request: Request) -> IngestPipeline:
         ingest: IngestPipeline | None = getattr(request.app.state, "ingest", None)
@@ -333,6 +341,9 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
             datetime | None,
             Query(description="Live polling: turns stored after this time (previous `as_of`)."),
         ] = None,
+        hide_sample: Annotated[
+            bool, Query(description="Leave out the startup sample data.")
+        ] = False,
     ) -> GatewayTurnList:
         """Gateway model calls, newest first."""
         for label, value in (("from", start), ("to", end), ("since", since)):
@@ -348,6 +359,7 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
                 limit=limit,
                 cursor=cursor,
                 since=since,
+                hide_sample=hide_sample,
             )
         except InvalidCursorError:
             raise _invalid("cursor", "invalid cursor") from None
@@ -363,13 +375,18 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
         request: Request,
         start: Annotated[datetime | None, Query(alias="from")] = None,
         end: Annotated[datetime | None, Query(alias="to")] = None,
+        hide_sample: Annotated[
+            bool, Query(description="Leave out the startup sample data.")
+        ] = False,
     ) -> GatewaySummary:
         """Per-client sessions, turns, tokens and cost over the window."""
         for label, value in (("from", start), ("to", end)):
             if value is not None and value.tzinfo is None:
                 raise _invalid(label, "timestamp must include a timezone")
         try:
-            return await get_store(request).gateway_summary(start=start, end=end)
+            return await get_store(request).gateway_summary(
+                start=start, end=end, hide_sample=hide_sample
+            )
         except NotImplementedError as exc:
             raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from None
 

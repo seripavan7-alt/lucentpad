@@ -15,11 +15,13 @@ import {
   type RangeId,
   type TracesView,
 } from "../features/traces/view";
+import { useHideSamplePreference } from "../lib/samplePreference";
 import { useNow } from "../lib/useNow";
 import { usePolling } from "../lib/usePolling";
 import { clientParams, type GatewayView } from "../features/gateway/view";
 import { isoMicros } from "../lib/time";
 import {
+  getDataInfo,
   getGatewaySummary,
   getHealth,
   getTrace,
@@ -60,8 +62,28 @@ interface PageParam {
   from: string;
 }
 
-export function tracesKey(view: TracesView): QueryKey {
-  return ["traces", view.range, view.sort, view.order, filterParams(view.filters)];
+/** What the database holds (sample, real, both). Polled, so the "Hide sample data" toggle
+ * appears once the first real trace arrives. */
+export function useDataInfo() {
+  return useQuery({
+    queryKey: ["data-info"],
+    queryFn: ({ signal }) => getDataInfo(signal),
+    refetchInterval: 15_000,
+  });
+}
+
+/** Whether to leave sample data out: the viewer asked to, and there is real data to show. */
+export function useHideSample(): boolean {
+  const pref = useHideSamplePreference();
+  const info = useDataInfo();
+  return pref && info.data?.real_data === true && info.data.sample_data;
+}
+
+const sampleParam = (hide: boolean): { hide_sample?: boolean } =>
+  hide ? { hide_sample: true } : {};
+
+export function tracesKey(view: TracesView, hideSample = false): QueryKey {
+  return ["traces", view.range, view.sort, view.order, filterParams(view.filters), hideSample];
 }
 
 /** `sort` as a request param: left out for the API's default ("started"). */
@@ -70,8 +92,9 @@ function sortParam(view: TracesView): { sort?: TracesView["sort"] } {
 }
 
 export function useTraces(view: TracesView) {
+  const hideSample = useHideSample();
   return useInfiniteQuery({
-    queryKey: tracesKey(view),
+    queryKey: tracesKey(view, hideSample),
     queryFn: async ({ pageParam, signal }): Promise<TracePage> => {
       // The first page recomputes the rolling window; later pages reuse it, because the
       // server binds each cursor to the exact filter set (`from` included).
@@ -84,6 +107,7 @@ export function useTraces(view: TracesView) {
           order: view.order,
           from,
           ...filterParams(view.filters),
+          ...sampleParam(hideSample),
         },
         signal,
       );
@@ -98,15 +122,23 @@ export function useTraces(view: TracesView) {
   });
 }
 
-export function facetsKey(range: RangeId, filters: FacetSelection): QueryKey {
-  return ["facets", range, filterParams(filters)];
+export function facetsKey(range: RangeId, filters: FacetSelection, hideSample = false): QueryKey {
+  return ["facets", range, filterParams(filters), hideSample];
 }
 
 export function useTraceFacets(view: TracesView) {
+  const hideSample = useHideSample();
   return useQuery({
-    queryKey: facetsKey(view.range, view.filters),
+    queryKey: facetsKey(view.range, view.filters, hideSample),
     queryFn: ({ signal }) =>
-      getTraceFacets({ from: rangeFrom(view.range), ...filterParams(view.filters) }, signal),
+      getTraceFacets(
+        {
+          from: rangeFrom(view.range),
+          ...filterParams(view.filters),
+          ...sampleParam(hideSample),
+        },
+        signal,
+      ),
     placeholderData: keepPreviousData,
   });
 }
@@ -174,10 +206,11 @@ function useFreshIds(): [ReadonlySet<string>, (ids: string[]) => void] {
 export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<string> {
   const client = useQueryClient();
   const [fresh, highlight] = useFreshIds();
+  const hideSample = useHideSample();
 
   usePolling(
     async (signal) => {
-      const key = tracesKey(view);
+      const key = tracesKey(view, hideSample);
       const data = client.getQueryData<InfiniteData<TracePage>>(key);
       const first = data?.pages[0];
       if (!first || client.isFetching({ queryKey: key }) > 0) return;
@@ -189,6 +222,7 @@ export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<s
           since: first.as_of,
           from: rangeFrom(view.range),
           ...filterParams(view.filters),
+          ...sampleParam(hideSample),
         },
         signal,
       );
@@ -305,22 +339,29 @@ export interface GatewayPage extends GatewayTurnList {
   from: string;
 }
 
-export function gatewayTurnsKey(view: GatewayView): QueryKey {
-  return ["gateway-turns", view.range, view.client];
+export function gatewayTurnsKey(view: GatewayView, hideSample = false): QueryKey {
+  return ["gateway-turns", view.range, view.client, hideSample];
 }
 
-export function gatewaySummaryKey(range: RangeId): QueryKey {
-  return ["gateway-summary", range];
+export function gatewaySummaryKey(range: RangeId, hideSample = false): QueryKey {
+  return ["gateway-summary", range, hideSample];
 }
 
 /** Gateway turns in the view's window, newest first, paged by cursor. */
 export function useGatewayTurns(view: GatewayView) {
+  const hideSample = useHideSample();
   return useInfiniteQuery({
-    queryKey: gatewayTurnsKey(view),
+    queryKey: gatewayTurnsKey(view, hideSample),
     queryFn: async ({ pageParam, signal }): Promise<GatewayPage> => {
       const from = pageParam?.from ?? rangeFrom(view.range);
       const list = await listGatewayTurns(
-        { limit: PAGE_SIZE, cursor: pageParam?.cursor, from, ...clientParams(view) },
+        {
+          limit: PAGE_SIZE,
+          cursor: pageParam?.cursor,
+          from,
+          ...clientParams(view),
+          ...sampleParam(hideSample),
+        },
         signal,
       );
       return { ...list, from };
@@ -334,9 +375,11 @@ export function useGatewayTurns(view: GatewayView) {
 
 /** Per-client totals for the range (every client, whatever the client filter). */
 export function useGatewaySummary(range: RangeId) {
+  const hideSample = useHideSample();
   return useQuery({
-    queryKey: gatewaySummaryKey(range),
-    queryFn: ({ signal }) => getGatewaySummary({ from: rangeFrom(range) }, signal),
+    queryKey: gatewaySummaryKey(range, hideSample),
+    queryFn: ({ signal }) =>
+      getGatewaySummary({ from: rangeFrom(range), ...sampleParam(hideSample) }, signal),
     placeholderData: keepPreviousData,
   });
 }
@@ -381,10 +424,11 @@ export function mergeGatewayTurns(
 export function useLiveGatewayTurns(view: GatewayView, enabled: boolean): ReadonlySet<string> {
   const client = useQueryClient();
   const [fresh, highlight] = useFreshIds();
+  const hideSample = useHideSample();
 
   usePolling(
     async (signal) => {
-      const key = gatewayTurnsKey(view);
+      const key = gatewayTurnsKey(view, hideSample);
       const data = client.getQueryData<InfiniteData<GatewayPage>>(key);
       const first = data?.pages[0];
       if (!first || client.isFetching({ queryKey: key }) > 0) return;
@@ -394,13 +438,14 @@ export function useLiveGatewayTurns(view: GatewayView, enabled: boolean): Readon
           since: first.as_of,
           from: rangeFrom(view.range),
           ...clientParams(view),
+          ...sampleParam(hideSample),
         },
         signal,
       );
       if (update.turns.length >= LIVE_LIMIT) {
         // Too much changed to merge (the API caps `since` at `limit`); start over.
         await client.invalidateQueries({ queryKey: key });
-        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range) });
+        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range, hideSample) });
         return;
       }
       const current = client.getQueryData<InfiniteData<GatewayPage>>(key);
@@ -409,7 +454,7 @@ export function useLiveGatewayTurns(view: GatewayView, enabled: boolean): Readon
       client.setQueryData(key, merged.data);
       if (merged.added.length > 0) {
         highlight(merged.added);
-        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range) });
+        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range, hideSample) });
       }
     },
     { intervalMs: LIST_POLL_MS, enabled },

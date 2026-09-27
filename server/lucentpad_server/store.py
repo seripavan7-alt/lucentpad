@@ -28,6 +28,7 @@ from lucentpad_server.schema import (
     PREVIEW_MAX_CHARS,
     Attr,
     Attributes,
+    DataInfo,
     EventName,
     FacetValue,
     GatewayClientTotals,
@@ -61,6 +62,7 @@ _SPAN_COLUMNS = (
     "cost_usd",
     "attributes",
     "events",
+    "sample",
 )
 
 _CREATE_STAGE = """
@@ -110,6 +112,7 @@ WITH ins AS (
         coalesce(sum(cost_usd), 0) AS cost_usd,
         coalesce(array_agg(DISTINCT model ORDER BY model) FILTER (WHERE model IS NOT NULL),
                  '{}') AS models,
+        bool_or(sample) AS sample,
         (array_agg(attributes ->> $1 ORDER BY in_key, span_id)
             FILTER (WHERE in_key IS NOT NULL))[1] AS input_preview,
         min(in_key) AS input_preview_key,
@@ -122,11 +125,11 @@ WITH ins AS (
 INSERT INTO traces AS t (
     trace_id, has_root, name, source, service_name, client, start_time, end_time, status,
     span_count, llm_calls, input_tokens, output_tokens, cost_usd, models,
-    input_preview, input_preview_key, output_preview, output_preview_key
+    input_preview, input_preview_key, output_preview, output_preview_key, sample
 )
 SELECT trace_id, has_root, name, source, service_name, client, start_time, end_time, status,
        span_count, llm_calls, input_tokens, output_tokens, cost_usd, models,
-       input_preview, input_preview_key, output_preview, output_preview_key
+       input_preview, input_preview_key, output_preview, output_preview_key, sample
 FROM agg
 ORDER BY trace_id
 ON CONFLICT (trace_id) DO UPDATE SET
@@ -158,6 +161,7 @@ ON CONFLICT (trace_id) DO UPDATE SET
                                OR excluded.output_preview_key > t.output_preview_key
                           THEN excluded.output_preview ELSE t.output_preview END,
     output_preview_key = greatest(t.output_preview_key, excluded.output_preview_key),
+    sample = t.sample OR excluded.sample,
     updated_at = now()
 RETURNING 1
 )
@@ -167,7 +171,7 @@ SELECT count(*) FROM ins
 _SUMMARY_COLUMNS = """
     trace_id, name, source, service_name, client, start_time, end_time, status,
     span_count, llm_calls, input_tokens, output_tokens, cost_usd, models,
-    input_preview, output_preview
+    input_preview, output_preview, sample
 """
 
 # D11 sample shift ($1 = interval). Event times live inside the events jsonb array.
@@ -215,7 +219,7 @@ _FACET_COLUMNS: Final = {
 def _filter_sql(filters: TraceFilter, args: list[Any], *, exclude: str | None = None) -> list[str]:
     """WHERE conditions for ``filters``, appending their parameters to ``args``: the time
     window plus every facet filter except ``exclude``. OR within a filter, AND across."""
-    where: list[str] = []
+    where: list[str] = ["NOT sample"] if filters.hide_sample else []
     if filters.start is not None:
         args.append(filters.start)
         where.append(f"start_time >= ${len(args)}")
@@ -395,7 +399,7 @@ def _cap_previews(attrs: Attributes) -> Attributes:
     return capped
 
 
-def _record(span: Span) -> tuple[Any, ...]:
+def _record(span: Span, sample: bool = False) -> tuple[Any, ...]:
     model, in_tok, out_tok, cost = _extract(span)
     return (
         span.trace_id,
@@ -414,6 +418,7 @@ def _record(span: Span) -> tuple[Any, ...]:
         None if cost is None else Decimal(str(cost)),
         _cap_previews(span.attributes),
         [e.model_dump(mode="json") for e in span.events],
+        sample,
     )
 
 
@@ -437,6 +442,7 @@ def _summary(row: asyncpg.Record) -> TraceSummary:
         models=list(row["models"]),
         input_preview=row["input_preview"],
         output_preview=row["output_preview"],
+        sample=row["sample"],
     )
 
 
@@ -498,8 +504,10 @@ _GW_TURN_COLUMNS = f"""
 _PROVIDERS: Final[dict[str, GatewayProvider]] = {"anthropic": "anthropic", "openai": "openai"}
 
 
-def _gateway_window(start: datetime | None, end: datetime | None, args: list[Any]) -> list[str]:
-    where = [_GW_TURN]
+def _gateway_window(
+    start: datetime | None, end: datetime | None, args: list[Any], hide_sample: bool = False
+) -> list[str]:
+    where = [_GW_TURN, *(["NOT sample"] if hide_sample else [])]
     if start is not None:
         args.append(start)
         where.append(f"start_time >= ${len(args)}")
@@ -510,12 +518,16 @@ def _gateway_window(start: datetime | None, end: datetime | None, args: list[Any
 
 
 def _gateway_fingerprint(
-    start: datetime | None, end: datetime | None, clients: tuple[str, ...]
+    start: datetime | None,
+    end: datetime | None,
+    clients: tuple[str, ...],
+    hide_sample: bool = False,
 ) -> str:
     data = {
         "from": start.isoformat() if start else None,
         "to": end.isoformat() if end else None,
         "client": sorted(set(clients)),
+        **({"hide_sample": True} if hide_sample else {}),
     }
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -568,13 +580,14 @@ def _gateway_turns_sql(
     since: datetime | None,
     after: GatewayCursor | None,
     limit: int,
+    hide_sample: bool = False,
 ) -> tuple[str, list[Any]]:
     """The turns query and its parameters. A client filter becomes one ordered, limited branch
     per client (``client = $n``, served in page order by ``spans_gateway_client_idx``) merged by
     the outer ORDER BY: Postgres 16 can't keep index order for ``= ANY(...)``, so a filter on a
     rare client would otherwise sort every matching turn."""
     args: list[Any] = []
-    where = _gateway_window(start, end, args)
+    where = _gateway_window(start, end, args, hide_sample)
     if since is not None:
         args.append(since - LIVE_OVERLAP)
         where.append(f"stored_at > ${len(args)}")
@@ -597,11 +610,13 @@ def _gateway_turns_sql(
     return f"SELECT *, now() AS as_of FROM ({union}) AS u {_GW_ORDER} {limit_sql}", args  # noqa: S608
 
 
-def _gateway_summary_sql(start: datetime | None, end: datetime | None) -> tuple[str, list[Any]]:
+def _gateway_summary_sql(
+    start: datetime | None, end: datetime | None, hide_sample: bool = False
+) -> tuple[str, list[Any]]:
     """Per-client totals: first per (client, trace) (hash aggregate, no DISTINCT sort), then
     per client. Most expensive first, ties by client in code point order."""
     args: list[Any] = []
-    where = _gateway_window(start, end, args)
+    where = _gateway_window(start, end, args, hide_sample)
     sql = (
         "SELECT client, count(*) AS sessions, sum(turns) AS turns,"  # noqa: S608 - fixed fragments
         " sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,"
@@ -660,7 +675,7 @@ class SpanStore:
         database as holding real data, which stops the sample time shift for good (D11).
         Returns the number of spans newly stored.
         """
-        records = [_record(s) for s in spans]
+        records = [_record(s, sample) for s in spans]
         if not records:
             return 0
         mark = META_SAMPLE_SEEDED if sample else None
@@ -676,6 +691,16 @@ class SpanStore:
         if mark == META_REAL_DATA:
             self._real_data_marked = True
         return int(inserted)
+
+    async def data_info(self) -> DataInfo:
+        """Whether the database holds sample traces, real ones, or both."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT EXISTS (SELECT 1 FROM traces WHERE sample) AS sample_data,"
+                " EXISTS (SELECT 1 FROM traces WHERE NOT sample) AS real_data"
+            )
+        assert row is not None
+        return DataInfo(sample_data=row["sample_data"], real_data=row["real_data"])
 
     async def is_empty(self) -> bool:
         async with self._pool.acquire() as conn:
@@ -833,6 +858,7 @@ class SpanStore:
         limit: int,
         cursor: str | None,
         since: datetime | None,
+        hide_sample: bool = False,
     ) -> GatewayTurnList:
         """Gateway llm spans (one turn each) with ``start_time`` in [start, end), newest first
         by (start_time, span_id, trace_id), optionally only the given ``lucentpad.client``
@@ -841,11 +867,11 @@ class SpanStore:
         With ``since`` (live polling): only turns stored after ``since - LIVE_OVERLAP``, at
         most ``limit`` of them, and never a next cursor.
         """
-        fingerprint = _gateway_fingerprint(start, end, clients)
+        fingerprint = _gateway_fingerprint(start, end, clients, hide_sample)
         after = GatewayCursor.decode(cursor) if cursor is not None else None
         if after is not None and after.fingerprint != fingerprint:
             raise InvalidCursorError("cursor was issued for another filter set")
-        sql, args = _gateway_turns_sql(start, end, clients, since, after, limit + 1)
+        sql, args = _gateway_turns_sql(start, end, clients, since, after, limit + 1, hide_sample)
         async with self._pool.acquire() as conn:
             rows: Sequence[asyncpg.Record] = await conn.fetch(sql, *args)
             as_of: datetime = rows[0]["as_of"] if rows else await conn.fetchval("SELECT now()")
@@ -860,12 +886,12 @@ class SpanStore:
         )
 
     async def gateway_summary(
-        self, *, start: datetime | None, end: datetime | None
+        self, *, start: datetime | None, end: datetime | None, hide_sample: bool = False
     ) -> GatewaySummary:
         """Per-client totals over gateway turns with ``start_time`` in [start, end): sessions
         (distinct traces with a turn in the window), turns, tokens and cost. Most expensive
         first, ties by client (code point order). Turns without a client count as ``other``."""
-        sql, args = _gateway_summary_sql(start, end)
+        sql, args = _gateway_summary_sql(start, end, hide_sample)
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(sql, *args)
             as_of: datetime = await conn.fetchval("SELECT now()")

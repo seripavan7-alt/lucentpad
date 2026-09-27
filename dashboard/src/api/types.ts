@@ -3,6 +3,7 @@ import type { components, operations } from "./schema";
 type Schemas = components["schemas"];
 
 export type TraceSummary = Schemas["TraceSummary"];
+export type DataInfo = Schemas["DataInfo"];
 export type TraceList = Schemas["TraceList"];
 export type TraceDetail = Schemas["TraceDetail"];
 export type TraceFacets = Schemas["TraceFacets"];

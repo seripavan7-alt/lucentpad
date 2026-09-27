@@ -168,6 +168,7 @@ export const supportSummary: TraceSummary = {
   output_tokens: 560,
   cost_usd: 0.0209,
   models: ["claude-sonnet-4-5"],
+  sample: false,
   input_preview: "Where's order 1042?\nI want a refund.",
   output_preview: "I've issued a refund of $42.00 for order 1042.",
 };
@@ -221,6 +222,7 @@ export const blockedSummary: TraceSummary = {
   output_tokens: 96,
   cost_usd: 0.0054,
   models: ["claude-sonnet-4-5"],
+  sample: false,
   input_preview: null,
   output_preview: null,
 };
@@ -280,6 +282,7 @@ export const claudeCodeSummary: TraceSummary = {
   output_tokens: 2_350,
   cost_usd: 1.0058,
   models: ["claude-opus-4-1", "claude-sonnet-4-5"],
+  sample: false,
   input_preview: null,
   output_preview: null,
 };
@@ -299,6 +302,7 @@ export const copilotSummary: TraceSummary = {
   output_tokens: 0,
   cost_usd: 0,
   models: ["gpt-4.1"],
+  sample: false,
   input_preview: null,
   output_preview: null,
 };

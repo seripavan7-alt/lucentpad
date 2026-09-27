@@ -1,6 +1,7 @@
 import { useState, type ComponentType, type SVGProps } from "react";
 import { Link, NavLink, Outlet } from "react-router";
-import { useHealth } from "../api/queries";
+import { useDataInfo, useHealth } from "../api/queries";
+import { setHideSamplePreference, useHideSamplePreference } from "../lib/samplePreference";
 import { useDemoMode } from "../demo/context";
 import { Logo } from "./Logo";
 import { CostsIcon, EvalsIcon, GatewayIcon, GuardrailsIcon, TracesIcon } from "./icons";
@@ -32,6 +33,27 @@ function ApiStatus() {
       <span className={styles.apiDot} aria-hidden="true" />
       {label}
     </span>
+  );
+}
+
+/** Tiny switch, shown only when the database holds both sample and real data. */
+function SampleToggle() {
+  const info = useDataInfo();
+  const hide = useHideSamplePreference();
+  if (!(info.data?.sample_data && info.data.real_data)) return null;
+  return (
+    <label className={styles.sampleToggle}>
+      <input
+        type="checkbox"
+        role="switch"
+        checked={hide}
+        onChange={(e) => {
+          setHideSamplePreference(e.target.checked);
+        }}
+      />
+      <span className={styles.switch} aria-hidden="true" />
+      Hide sample data
+    </label>
   );
 }
 
@@ -79,6 +101,7 @@ export function Layout() {
           ))}
         </nav>
         <div ref={setSlot} className={styles.slot} />
+        <SampleToggle />
         <div className={styles.footer}>
           {demo ? (
             <span className={styles.apiStatus} data-state="demo">

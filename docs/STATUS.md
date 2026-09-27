@@ -126,6 +126,7 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 ## Decisions log
 | Date | Decision |
 | --- | --- |
+| 2026-09-27 | Sample data is labelled (`spans.sample`/`traces.sample`, migration 0005 backfills existing DBs). `GET /v1/data` → `{sample_data, real_data}`; `hide_sample` param on traces, facets, gateway turns/summary. Dashboard: small "Sample" tag and a "Hide sample data" switch in the sidebar, both shown only when real data exists too (never in the static demo). |
 | 2026-09-25 | M2 "go" with D16–D19 as recommended. |
 | 2026-09-25 | M2 D14: user has **Anthropic + OpenAI** keys for the live checks (Claude Code + Copilot CLI on Anthropic, Copilot Chat Custom Endpoint on OpenAI). D15: Claude Code signs in with an **Anthropic API key**. Copilot is traceable only in BYOK mode (documented in M2.md). D16–D19: recommendations pending the user's "go". |
 | 2026-09-25 | Landing page (user: "best of the 3 drafts, human, not vibecoded; don't wait for me"): `src/site/home/Home.tsx`: left-aligned hero ("See what your agent actually did.") with **Open the dashboard** + **Get started**; a receipt of one real demo run; C's dark "Open the dashboard. No install, no sign-up." stage with the **real dashboard embedded** (A); A's "Get started in minutes" tabbed quick start with the full guide expandable in place; "Built in the open" milestone list. Drafts removed. Demo links back to the site use `target=_top`. |

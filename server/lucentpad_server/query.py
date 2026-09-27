@@ -31,6 +31,7 @@ class TraceFilter:
     client: tuple[str, ...] = field(default=())
     model: tuple[str, ...] = field(default=())  # matches any of the trace's models
     service: tuple[str, ...] = field(default=())
+    hide_sample: bool = False  # leave out the startup sample data
 
     def values(self, facet: str) -> tuple[str, ...]:
         """The selected values of one facet filter."""
@@ -46,6 +47,7 @@ class TraceFilter:
             "from": self.start.isoformat() if self.start else None,
             "to": self.end.isoformat() if self.end else None,
             **{f: sorted(self.values(f)) for f in FACETS},
+            **({"hide_sample": True} if self.hide_sample else {}),
         }
         digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
         return digest[:16]

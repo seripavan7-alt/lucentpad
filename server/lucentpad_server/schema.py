@@ -182,6 +182,9 @@ class TraceSummary(_Model):
     output_tokens: int
     cost_usd: float
     models: list[str]
+    sample: bool = Field(
+        default=False, description="Startup sample data (not something you recorded)."
+    )
     input_preview: str | None = Field(
         description="The run's first user message (root span's input, else the earliest llm "
         "span's); null when capture is off."
@@ -211,6 +214,13 @@ class TraceDetail(_Model):
     as_of: datetime = Field(
         description="Server time of this response; pass it as `since` on the next live poll."
     )
+
+
+class DataInfo(_Model):
+    """What the database holds: the startup sample, real recorded data, or both."""
+
+    sample_data: bool
+    real_data: bool
 
 
 class FacetValue(_Model):

@@ -494,6 +494,8 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     const { pathname, searchParams } = new URL(url, "http://demo.invalid");
     try {
       if (pathname === "/healthz") return json({ status: "ok" });
+      // The demo is all sample data, so the "Hide sample data" switch never shows.
+      if (pathname === "/v1/data") return json({ sample_data: true, real_data: false });
       if (pathname === "/v1/traces") return list(searchParams);
       if (pathname === "/v1/traces/facets") return facets(searchParams);
       if (pathname === "/v1/gateway/turns") return gatewayTurns(searchParams);

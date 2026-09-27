@@ -52,6 +52,7 @@ def test_openapi_without_database() -> None:
     schema = create_app().openapi()
     assert set(schema["paths"]) == {
         "/healthz",
+        "/v1/data",
         "/v1/spans",
         "/v1/ingest/stats",
         "/v1/traces",

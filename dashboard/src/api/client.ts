@@ -1,4 +1,5 @@
 import type {
+  DataInfo,
   GatewaySummary,
   GatewaySummaryParams,
   GatewayTurnList,
@@ -21,7 +22,7 @@ export class ApiError extends Error {
   }
 }
 
-type QueryValue = string | number | readonly string[] | null | undefined;
+type QueryValue = string | number | boolean | readonly string[] | null | undefined;
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -107,6 +108,10 @@ export function getGatewaySummary(
   signal?: AbortSignal,
 ): Promise<GatewaySummary> {
   return getJson<GatewaySummary>(buildUrl("/v1/gateway/summary", params), signal);
+}
+
+export function getDataInfo(signal?: AbortSignal): Promise<DataInfo> {
+  return getJson<DataInfo>("/v1/data", signal);
 }
 
 export function getHealth(signal?: AbortSignal): Promise<Record<string, string>> {

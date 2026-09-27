@@ -1,3 +1,4 @@
+import { useDataInfo } from "../../api/queries";
 import { useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import type { TraceOrder, TraceSort, TraceSummary } from "../../api/types";
@@ -97,6 +98,9 @@ export function TracesTable({ traces, sort, order, onSort, fresh, stale }: Trace
   const tbody = useRef<HTMLTableSectionElement>(null);
   useScrollAnchor(tbody, "data-trace-id", traces[0]?.trace_id ?? "");
   const sortProps = { sort, order, onSort };
+  // Tag sample rows only when real data sits next to them (in a sample-only database, and in
+  // the static demo, every row is sample and the tag would be noise).
+  const tagSample = useDataInfo().data?.real_data === true;
 
   return (
     <div
@@ -167,10 +171,13 @@ export function TracesTable({ traces, sort, order, onSort, fresh, stale }: Trace
                   void navigate(href);
                 }}
               >
-                <td className={styles.clip}>
-                  <Link to={href} className={styles.name} title={t.name}>
-                    {t.name}
-                  </Link>
+                <td>
+                  <span className={styles.nameCell}>
+                    <Link to={href} className={styles.name} title={t.name}>
+                      {t.name}
+                    </Link>
+                    {tagSample && t.sample && <span className={styles.sampleTag}>Sample</span>}
+                  </span>
                 </td>
                 <td className={styles.clip}>
                   <span className={styles.source}>

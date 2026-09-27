@@ -69,6 +69,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data Info
+         * @description Whether the database holds the startup sample data, real data, or both.
+         */
+        get: operations["data_info_v1_data_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/gateway/summary": {
         parameters: {
             query?: never;
@@ -201,6 +221,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * DataInfo
+         * @description What the database holds: the startup sample, real recorded data, or both.
+         */
+        DataInfo: {
+            /** Real Data */
+            real_data: boolean;
+            /** Sample Data */
+            sample_data: boolean;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Detail */
@@ -502,6 +532,12 @@ export interface components {
             output_preview: string | null;
             /** Output Tokens */
             output_tokens: number;
+            /**
+             * Sample
+             * @description Startup sample data (not something you recorded).
+             * @default false
+             */
+            sample: boolean;
             /** Service Name */
             service_name: string | null;
             /**
@@ -684,11 +720,33 @@ export interface operations {
             };
         };
     };
+    data_info_v1_data_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataInfo"];
+                };
+            };
+        };
+    };
     gateway_summary_v1_gateway_summary_get: {
         parameters: {
             query?: {
                 from?: string | null;
                 to?: string | null;
+                /** @description Leave out the startup sample data. */
+                hide_sample?: boolean;
             };
             header?: never;
             path?: never;
@@ -736,6 +794,8 @@ export interface operations {
                 cursor?: string | null;
                 /** @description Live polling: turns stored after this time (previous `as_of`). */
                 since?: string | null;
+                /** @description Leave out the startup sample data. */
+                hide_sample?: boolean;
             };
             header?: never;
             path?: never;
@@ -868,6 +928,8 @@ export interface operations {
                 model?: string[] | null;
                 /** @description `service.name`. */
                 service?: string[] | null;
+                /** @description Leave out the startup sample data. */
+                hide_sample?: boolean;
             };
             header?: never;
             path?: never;
@@ -920,6 +982,8 @@ export interface operations {
                 model?: string[] | null;
                 /** @description `service.name`. */
                 service?: string[] | null;
+                /** @description Leave out the startup sample data. */
+                hide_sample?: boolean;
             };
             header?: never;
             path?: never;

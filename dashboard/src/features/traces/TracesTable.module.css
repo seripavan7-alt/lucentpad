@@ -144,6 +144,32 @@
   font-weight: var(--weight-medium);
 }
 
+/* Name truncates; the Sample tag beside it always stays whole. */
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nameCell .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sampleTag {
+  flex: none;
+  padding: 0 5px;
+  border: var(--border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-regular);
+  line-height: 16px;
+}
+
 .name:focus-visible {
   border-radius: var(--radius-xs);
 }

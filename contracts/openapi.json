@@ -1,6 +1,26 @@
 {
   "components": {
     "schemas": {
+      "DataInfo": {
+        "additionalProperties": false,
+        "description": "What the database holds: the startup sample, real recorded data, or both.",
+        "properties": {
+          "real_data": {
+            "title": "Real Data",
+            "type": "boolean"
+          },
+          "sample_data": {
+            "title": "Sample Data",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sample_data",
+          "real_data"
+        ],
+        "title": "DataInfo",
+        "type": "object"
+      },
       "ErrorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -759,6 +779,12 @@
             "title": "Output Tokens",
             "type": "integer"
           },
+          "sample": {
+            "default": false,
+            "description": "Startup sample data (not something you recorded).",
+            "title": "Sample",
+            "type": "boolean"
+          },
           "service_name": {
             "anyOf": [
               {
@@ -1035,6 +1061,28 @@
         ]
       }
     },
+    "/v1/data": {
+      "get": {
+        "description": "Whether the database holds the startup sample data, real data, or both.",
+        "operationId": "data_info_v1_data_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Data Info",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
     "/v1/gateway/summary": {
       "get": {
         "description": "Per-client sessions, turns, tokens and cost over the window.",
@@ -1072,6 +1120,18 @@
                 }
               ],
               "title": "To"
+            }
+          },
+          {
+            "description": "Leave out the startup sample data.",
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave out the startup sample data.",
+              "title": "Hide Sample",
+              "type": "boolean"
             }
           }
         ],
@@ -1218,6 +1278,18 @@
               ],
               "description": "Live polling: turns stored after this time (previous `as_of`).",
               "title": "Since"
+            }
+          },
+          {
+            "description": "Leave out the startup sample data.",
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave out the startup sample data.",
+              "title": "Hide Sample",
+              "type": "boolean"
             }
           }
         ],
@@ -1601,6 +1673,18 @@
               "description": "`service.name`.",
               "title": "Service"
             }
+          },
+          {
+            "description": "Leave out the startup sample data.",
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave out the startup sample data.",
+              "title": "Hide Sample",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1810,6 +1894,18 @@
               ],
               "description": "`service.name`.",
               "title": "Service"
+            }
+          },
+          {
+            "description": "Leave out the startup sample data.",
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave out the startup sample data.",
+              "title": "Hide Sample",
+              "type": "boolean"
             }
           }
         ],
