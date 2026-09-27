@@ -1,16 +1,32 @@
 # LucentPad status
 
-**New agent? Read `CLAUDE.md` first, then this file, then `docs/handoff/M1.md`.**
+**New agent? Read `CLAUDE.md` first, then this file, then `docs/handoff/M2.md` (M1.md is history).**
 Source of truth: `docs/PRD.md`. Process: plan → "go" → build → checkpoint → "approved" → commit `M<n>: <title>`.
 
 ## Now
-- **Milestone:** M1 ✅ approved 2026-09-25 and committed. **Next: M2 Gateway** (plan not written yet;
-  write `docs/handoff/M2.md` and get the user's "go").
+- **Milestone:** M2 ✅ approved 2026-09-27, committed `M2: Gateway`. **Next: M3** (guardrails, budgets, Costs, Guardrails, Evals pages, `lucentpad eval`); plan not written yet.
 - **Live:** repo https://github.com/seripavan7-alt/lucentpad · site https://seripavan7-alt.github.io/lucentpad/
-- **Next action:** plan M2 (PRD: Anthropic + OpenAI gateway routes with streaming passthrough, Gateway page,
-  simple failover; Claude Code, Copilot Chat, Copilot CLI). M2 needs from the user: their Claude Code /
-  Copilot setup. No Claude attribution in commits or PRs (user rule).
+- **Next action:** write `docs/handoff/M3.md` and get the user's "go". Open action items below.
 - **Blockers:** none.
+
+## M2 step log
+| Step | State | Owner / date | Handoff notes |
+| --- | --- | --- | --- |
+| 0 Decisions D14–D19 | ✅ | lead 2026-09-25 | See decisions log. |
+| 1 Contract | ✅ | lead 2026-09-25 | See **M2 contract notes**. |
+| 2 Gateway proxy (`server/lucentpad_server/gateway/`) | ✅ | gateway agent 2026-09-25 | Modules config/clients/sessions/parse/spans/proxy. Env: `LUCENTPAD_{ANTHROPIC,OPENAI}_UPSTREAM`, `_GATEWAY_FAILOVER`, `_KEY_SALT` (random per process if unset), `_GATEWAY_SESSION_GAP` (1800), `_GATEWAY_SESSION_HEADERS` (x-claude-code-session-id), `_GATEWAY_READ_TIMEOUT` (600), `_GATEWAY_CAPTURE_CONTENT`, `_GATEWAY_CLIENT_UA`. accept-encoding→identity. Added p95 0.45 ms (in-process). UA rules for Copilot BYOK are unverified → check at checkpoint. Lead added: httpx runtime dep, dated-model pricing, cache tokens (`gen_ai.usage.cache_{read,creation}.input_tokens`, input_tokens = all input) in gateway + SDK + pricing. Gaps: agent-id/request-class headers not recorded; failover ignores Retry-After; HEAD /api/hello → 405; multi-instance needs shared sessions. |
+| 3 Gateway query API (`store.py`, migrations) | ✅ | query agent 2026-09-25 | `gateway_turns`/`gateway_summary` in store.py; turn = span source=gateway kind=llm; client from the span attribute; order (start_time, span_id, trace_id) desc; per-client UNION ALL (PG16 can't use index order for `= ANY`). Migration `0004_gateway_turns.sql`: partial indexes `spans_gateway_{turns,client,stored}_idx`. Cursor base64url `{g,k,s,t,f}`. 7-day summary at 116k turns ≈ 0.5–0.75 s (fine at realistic volume; a generated client column would make it 159 ms). Parity keys `gateway_turns`, `gateway_summary`. Sample gateway spans lack upstream/ttfb/failover (to add). |
+| 4 Gateway page (`dashboard/`) | ✅ | dashboard agent 2026-09-25 | `pages/GatewayPage.tsx`, `features/gateway/*`; URL `?range`, `?client`; totals tiles, session-grouped feed, setup empty state with copy buttons; 3 s `since` polling. Contract gap: no per-session totals (header sums only loaded turns). |
+| 5 Docs + client setup | ✅ | lead 2026-09-25 | `docs/gateway.md`; getting-started §5 and home page tab updated. |
+| 6 Checkpoint | ✅ | lead 2026-09-25 | Automated green (379 py + 227 web). Docker stack proxies real Anthropic/OpenAI (401 without key passed through verbatim, shown live as an Other turn). Waiting: user's live runs with their keys, then "approved". |
+
+## M2 contract notes
+- Proxy routes: `POST|GET /gateway/anthropic/{path}` and `/gateway/openai/{path}` → `app.state.gateway`
+  (`GatewayProxy.forward(provider, path, request) -> Response`, `lucentpad_server/gateway/__init__.py`); 501 when unset.
+- Query: `GET /v1/gateway/turns?from&to&client*&limit&cursor&since` → `GatewayTurnList{turns: GatewayTurn[], next_cursor, as_of}`
+  (newest first; since+cursor → 422); `GET /v1/gateway/summary?from&to` → `GatewaySummary{clients: GatewayClientTotals[], as_of}`.
+  Store methods `SpanStore.gateway_turns(...)` / `gateway_summary(...)` (stubs → 501).
+- New `Attr`: `GATEWAY_UPSTREAM` (`lucentpad.gateway.upstream`), `TTFB_MS`, `KEY_FINGERPRINT`. `GatewayProvider` literal.
 
 ## M1 step log
 States: ⬜ not started · 🟡 in progress (write who/when) · ⏸ paused (write where) · ✅ done.
@@ -65,6 +81,11 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
   `__init__.py` (pytest rootdir mode), so give them unique basenames (`test_sdk_*.py`, `test_agent_*.py`).
 
 ## Milestone history
+### M2 Gateway: ✅ approved 2026-09-27, committed `M2: Gateway`
+- Anthropic + OpenAI proxy routes, byte-identical streaming (~0.5 ms added p95), key fingerprints only,
+  session grouping (Claude Code session header, else key + 30 min gap), non-streamed failover.
+- Gateway query API (turns, per-client summary) + Gateway page (totals, session feed, live, setup cards).
+- Cache-token pricing and dated model names. `docs/gateway.md`. Live Claude Code run verified.
 ### Post-M1 refinements: committed `UI refinements: sidebar filters, sorting, new home page`
 - Filters in the app sidebar (closed by default, custom checkboxes), 24h default range, sort by any column,
   clock-following static demo, logo links home, new home page (receipt of a reschedule run, embedded
@@ -92,6 +113,8 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 - Verified: `make check` green; `make dev` up on OrbStack; UI checked in Chrome, no console errors.
 
 ## Known follow-ups (not blocking)
+- **Action item (user):** Copilot CLI + Copilot Chat live checks through the gateway (need an Anthropic/OpenAI key, or Ollama); verify Copilot BYOK User-Agent detection.
+- **Later consideration (user):** tag Claude Code helper calls (title, quota) as "background" via `x-claude-code-request-class`; dim/hide on the Gateway page, still counted in cost.
 - Sorting (post-M1): migration `0003_trace_sorts.sql` (`traces.duration_ms` generated column; indexes `traces_{duration,cost,name,source}_idx`). Cursor = base64url JSON `{s,k,id,o,f}` (cost key is a Decimal string); old cursors → 422. A very selective filter + non-started sort walks the sort index (1.7 ms at 200k). Demo adapter cursor `d12.cost.<fp>`. Dashboard keeps previous rows while a new sort/filter loads.
 - While a run is live its trace is named after its first span (e.g. `chat claude-sonnet-5`) until the root span arrives last; fix idea: SDK exports a root "start" marker, or the server falls back to `service.name`.
 - List `since` polls cap at `limit` with no truncated flag; ingest shutdown returns 429 not 503.
@@ -103,6 +126,8 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 ## Decisions log
 | Date | Decision |
 | --- | --- |
+| 2026-09-25 | M2 "go" with D16–D19 as recommended. |
+| 2026-09-25 | M2 D14: user has **Anthropic + OpenAI** keys for the live checks (Claude Code + Copilot CLI on Anthropic, Copilot Chat Custom Endpoint on OpenAI). D15: Claude Code signs in with an **Anthropic API key**. Copilot is traceable only in BYOK mode (documented in M2.md). D16–D19: recommendations pending the user's "go". |
 | 2026-09-25 | Landing page (user: "best of the 3 drafts, human, not vibecoded; don't wait for me"): `src/site/home/Home.tsx`: left-aligned hero ("See what your agent actually did.") with **Open the dashboard** + **Get started**; a receipt of one real demo run; C's dark "Open the dashboard. No install, no sign-up." stage with the **real dashboard embedded** (A); A's "Get started in minutes" tabbed quick start with the full guide expandable in place; "Built in the open" milestone list. Drafts removed. Demo links back to the site use `target=_top`. |
 | 2026-09-25 | Traces list sortable by Name, Source, Duration, Cost (plus Started): `sort` param (`started|duration|name|source|cost`) + `order`; ties by trace_id; name/source code-point order (COLLATE "C"). |
 | 2026-09-25 | Post-M1 UI refinements (user): Traces filters moved into the app sidebar under the nav (portal into `Layout`'s slot; inline sheet ≤720px), restyled like the nav; Status/Source open by default, 5 values + "Show N more". **Default range 24h** (was 15m, D13 amended). Static demo follows the viewer's clock on every request (`createLiveDemoFetch`): each range always shows the same traces, whenever and however long it's open. |

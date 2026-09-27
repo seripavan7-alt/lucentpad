@@ -8,6 +8,10 @@
 import type {
   Facet,
   FacetValue,
+  GatewayClientTotals,
+  GatewaySummary,
+  GatewayTurn,
+  GatewayTurnList,
   Span,
   TraceDetail,
   TraceFacets,
@@ -16,7 +20,17 @@ import type {
   TraceSort,
   TraceSummary,
 } from "../api/types";
-import { FACET_MAX_VALUES, FACETS, SPAN_SOURCES, SPAN_STATUSES, TRACE_SORTS } from "../api/types";
+import {
+  Attr,
+  EventName,
+  FACET_MAX_VALUES,
+  FACETS,
+  GATEWAY_PROVIDERS,
+  SPAN_SOURCES,
+  SPAN_STATUSES,
+  TRACE_SORTS,
+} from "../api/types";
+import { isoMicros } from "../lib/time";
 
 export interface DemoSnapshot {
   generated_at: string;
@@ -29,6 +43,13 @@ const MAX_LIMIT = 200;
 
 function shiftTime(iso: string, ms: number): string {
   return new Date(Date.parse(iso) + ms).toISOString();
+}
+
+/** `shiftTime` that keeps the microsecond digits, so shifted turns still order exactly. */
+function shiftTimeMicros(iso: string, ms: number): string {
+  const micros = /\.\d{3}(\d{1,3})/.exec(iso)?.[1];
+  const shifted = shiftTime(iso, ms);
+  return micros ? shifted.replace(/Z$/, `${micros}Z`) : shifted;
 }
 
 /** Every timestamp moved by `ms`. Order and durations are unchanged. */
@@ -145,11 +166,11 @@ function matches(t: TraceSummary, filter: Filter, skip?: Facet): boolean {
 
 /** Stable key of the filter set, embedded in cursors (like the API's fingerprint). */
 function fingerprint(filter: Filter): string {
-  const data = JSON.stringify([
-    filter.from,
-    filter.to,
-    FACETS.map((f) => [...filter.values[f]].sort()),
-  ]);
+  return fingerprintOf([filter.from, filter.to, FACETS.map((f) => [...filter.values[f]].sort())]);
+}
+
+function fingerprintOf(parts: unknown): string {
+  const data = JSON.stringify(parts);
   let h = 0;
   for (let i = 0; i < data.length; i++) h = (Math.imul(h, 31) + data.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
@@ -182,6 +203,84 @@ const SORT_KEYS: Record<
   name: (a, b) => compareCodePoints(a.name, b.name),
   source: (a, b) => compareCodePoints(a.source, b.source),
 };
+
+// --------------------------------------------------------------------------- gateway (M2)
+
+type Attrs = NonNullable<Span["attributes"]>;
+
+const str = (attrs: Attrs, key: string): string | null => {
+  const v = attrs[key];
+  return typeof v === "string" ? v : null;
+};
+const int = (attrs: Attrs, key: string): number | null => {
+  const v = attrs[key];
+  return typeof v === "number" && Number.isInteger(v) ? v : null;
+};
+const finite = (attrs: Attrs, key: string): number | null => {
+  const v = attrs[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+};
+const provider = (value: string | null): GatewayTurn["provider"] =>
+  GATEWAY_PROVIDERS.find((p) => p === value) ?? null;
+
+/** A gateway llm span as the API's `GatewayTurn` (see `_gateway_turn` in store.py). */
+export function toGatewayTurn(span: Span): GatewayTurn {
+  const attrs = span.attributes ?? {};
+  const model =
+    [Attr.GEN_AI_RESPONSE_MODEL, Attr.GEN_AI_REQUEST_MODEL]
+      .map((k) => str(attrs, k))
+      .find((v) => v !== null && v !== "") ?? null;
+  return {
+    trace_id: span.trace_id,
+    span_id: span.span_id,
+    client: str(attrs, Attr.CLIENT),
+    provider:
+      provider(str(attrs, Attr.GATEWAY_UPSTREAM)) ?? provider(str(attrs, Attr.GEN_AI_SYSTEM)),
+    model,
+    start_time: span.start_time,
+    duration_ms: (isoMicros(span.end_time) - isoMicros(span.start_time)) / 1000,
+    ttfb_ms: finite(attrs, Attr.TTFB_MS),
+    status: span.status,
+    streaming: attrs[Attr.STREAMING] === true,
+    input_tokens: int(attrs, Attr.GEN_AI_INPUT_TOKENS),
+    output_tokens: int(attrs, Attr.GEN_AI_OUTPUT_TOKENS),
+    cost_usd: finite(attrs, Attr.COST_USD),
+    failover: (span.events ?? []).some((e) => e.name === EventName.FAILOVER),
+    input_preview: str(attrs, Attr.INPUT_PREVIEW),
+    output_preview: str(attrs, Attr.OUTPUT_PREVIEW),
+  };
+}
+
+interface GatewayRow {
+  turn: GatewayTurn;
+  start: number; // epoch µs
+  end: number; // epoch µs
+}
+
+/** Every gateway turn in the snapshot, in the API's order: start, span_id, trace_id, all desc. */
+function gatewayRows(snapshot: DemoSnapshot): GatewayRow[] {
+  const rows: GatewayRow[] = [];
+  for (const list of Object.values(snapshot.spans)) {
+    for (const span of list) {
+      if (span.source !== "gateway" || span.kind !== "llm") continue;
+      rows.push({
+        turn: toGatewayTurn(span),
+        start: isoMicros(span.start_time),
+        end: isoMicros(span.end_time),
+      });
+    }
+  }
+  const desc = (a: string, b: string) => compareCodePoints(b, a);
+  return rows.sort(
+    (a, b) =>
+      b.start - a.start ||
+      desc(a.turn.span_id, b.turn.span_id) ||
+      desc(a.turn.trace_id, b.turn.trace_id),
+  );
+}
+
+/** Cost sums in the API's `numeric(18, 8)` units, so totals match its decimal sums exactly. */
+const COST_UNITS = 1e8;
 
 const compareValues = (a: FacetValue, b: FacetValue): number =>
   b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
@@ -300,6 +399,96 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     return json(body);
   }
 
+  const gateway = gatewayRows(snapshot);
+
+  /** `[from, to)` on a turn's start, in µs (request times are ms precision). */
+  function inWindow(row: GatewayRow, from: number | null, to: number | null): boolean {
+    if (from !== null && row.start < from * 1000) return false;
+    if (to !== null && row.start >= to * 1000) return false;
+    return true;
+  }
+
+  function gatewayTurns(params: URLSearchParams): Response {
+    const rawLimit = params.get("limit");
+    const limit = rawLimit === null ? DEFAULT_LIMIT : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+      return invalid("limit", `limit must be an integer from 1 to ${MAX_LIMIT}`);
+    }
+    const from = parseTime(params, "from");
+    const to = parseTime(params, "to");
+    const since = parseTime(params, "since");
+    const clients = [...new Set(params.getAll("client"))].sort();
+    const rawCursor = params.get("cursor");
+    if (since !== null && rawCursor !== null) {
+      return invalid("cursor", "cursor cannot be combined with since");
+    }
+    const fp = fingerprintOf([from, to, clients]);
+    let after = -1;
+    if (rawCursor !== null) {
+      const match = /^g([0-9]+)\.([0-9a-z]+)$/.exec(rawCursor);
+      if (match?.[2] !== fp) return invalid("cursor", "invalid cursor");
+      after = Number(match[1]);
+    }
+    const page: GatewayTurn[] = [];
+    let lastIndex = -1;
+    let hasNext = false;
+    for (let i = after + 1; i < gateway.length; i++) {
+      const row = gateway[i];
+      if (!row) break;
+      if (!inWindow(row, from, to)) continue;
+      if (clients.length && !clients.includes(row.turn.client ?? "")) continue;
+      // Live polling: the snapshot never changes, so "stored after `since`" means ended after it.
+      if (since !== null && row.end <= since * 1000) continue;
+      if (page.length === limit) {
+        hasNext = true;
+        break;
+      }
+      page.push(row.turn);
+      lastIndex = i;
+    }
+    const body: GatewayTurnList = {
+      turns: page,
+      next_cursor: hasNext && since === null ? `g${lastIndex}.${fp}` : null,
+      as_of: new Date().toISOString(),
+    };
+    return json(body);
+  }
+
+  function gatewaySummary(params: URLSearchParams): Response {
+    const from = parseTime(params, "from");
+    const to = parseTime(params, "to");
+    const acc = new Map<
+      string,
+      { sessions: Set<string>; turns: number; input: number; output: number; cost: number }
+    >();
+    for (const row of gateway) {
+      if (!inWindow(row, from, to)) continue;
+      const key = row.turn.client ?? "other";
+      let a = acc.get(key);
+      if (!a) {
+        a = { sessions: new Set(), turns: 0, input: 0, output: 0, cost: 0 };
+        acc.set(key, a);
+      }
+      a.sessions.add(row.turn.trace_id);
+      a.turns += 1;
+      a.input += row.turn.input_tokens ?? 0;
+      a.output += row.turn.output_tokens ?? 0;
+      a.cost += Math.round((row.turn.cost_usd ?? 0) * COST_UNITS);
+    }
+    const clients: GatewayClientTotals[] = [...acc]
+      .map(([client, a]) => ({
+        client,
+        sessions: a.sessions.size,
+        turns: a.turns,
+        input_tokens: a.input,
+        output_tokens: a.output,
+        cost_usd: a.cost / COST_UNITS,
+      }))
+      .sort((a, b) => b.cost_usd - a.cost_usd || compareCodePoints(a.client, b.client));
+    const body: GatewaySummary = { clients, as_of: new Date().toISOString() };
+    return json(body);
+  }
+
   return async function demoFetch(url: string): Promise<Response> {
     await Promise.resolve();
     const { pathname, searchParams } = new URL(url, "http://demo.invalid");
@@ -307,6 +496,8 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
       if (pathname === "/healthz") return json({ status: "ok" });
       if (pathname === "/v1/traces") return list(searchParams);
       if (pathname === "/v1/traces/facets") return facets(searchParams);
+      if (pathname === "/v1/gateway/turns") return gatewayTurns(searchParams);
+      if (pathname === "/v1/gateway/summary") return gatewaySummary(searchParams);
       const traceId = /^\/v1\/traces\/([^/]+)$/.exec(pathname)?.[1];
       if (traceId !== undefined) return detail(decodeURIComponent(traceId), searchParams);
     } catch (err) {
@@ -375,6 +566,17 @@ export function createLiveDemoFetch(snapshot: DemoSnapshot, now: () => number = 
         next_cursor: list.next_cursor === null ? null : `${list.next_cursor}~${shift}`,
         as_of: asOf,
       } satisfies TraceList);
+    }
+    if (Array.isArray(body.turns)) {
+      const list = body as unknown as GatewayTurnList;
+      return json({
+        turns: list.turns.map((t) => ({ ...t, start_time: shiftTimeMicros(t.start_time, shift) })),
+        next_cursor: list.next_cursor === null ? null : `${list.next_cursor}~${shift}`,
+        as_of: asOf,
+      } satisfies GatewayTurnList);
+    }
+    if (Array.isArray(body.clients)) {
+      return json({ ...(body as unknown as GatewaySummary), as_of: asOf } satisfies GatewaySummary);
     }
     if (body.trace !== undefined && Array.isArray(body.spans)) {
       const detail = body as unknown as TraceDetail;

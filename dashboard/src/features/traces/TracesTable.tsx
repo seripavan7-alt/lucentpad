@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import type { TraceOrder, TraceSort, TraceSummary } from "../../api/types";
 import { ArrowDownIcon, ArrowUpIcon } from "../../components/icons";
@@ -14,6 +14,7 @@ import {
   traceOrigin,
 } from "../../lib/format";
 import { useNow } from "../../lib/useNow";
+import { useScrollAnchor } from "../../lib/useScrollAnchor";
 import styles from "./TracesTable.module.css";
 import { FIRST_ORDER } from "./view";
 
@@ -27,36 +28,6 @@ interface TracesTableProps {
   fresh?: ReadonlySet<string>;
   /** The rows are the previous view's, shown while a new sort or filter loads. */
   stale?: boolean;
-}
-
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
-  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node);
-    if (overflowY === "auto" || overflowY === "scroll") return node;
-  }
-  return null;
-}
-
-/**
- * Keep what the user is looking at in place when rows are prepended above it: if the list
- * is scrolled, shift the scroll position by the height the new rows added.
- */
-function useScrollAnchor(tbody: RefObject<HTMLTableSectionElement | null>, firstId: string) {
-  const anchor = useRef<{ id: string; top: number } | null>(null);
-  useLayoutEffect(() => {
-    const body = tbody.current;
-    if (!body) return;
-    const prev = anchor.current;
-    if (prev && prev.id !== firstId) {
-      const row = body.querySelector<HTMLElement>(`tr[data-trace-id="${prev.id}"]`);
-      const scroller = scrollParent(body);
-      if (row && scroller && scroller.scrollTop > 0) {
-        scroller.scrollTop += row.offsetTop - prev.top;
-      }
-    }
-    const first = body.querySelector<HTMLElement>(`tr[data-trace-id="${firstId}"]`);
-    anchor.current = first ? { id: firstId, top: first.offsetTop } : null;
-  }, [tbody, firstId]);
 }
 
 /** What each direction means per column, for the header's tooltip. */
@@ -124,7 +95,7 @@ export function TracesTable({ traces, sort, order, onSort, fresh, stale }: Trace
   const navigate = useNavigate();
   const now = useNow();
   const tbody = useRef<HTMLTableSectionElement>(null);
-  useScrollAnchor(tbody, traces[0]?.trace_id ?? "");
+  useScrollAnchor(tbody, "data-trace-id", traces[0]?.trace_id ?? "");
   const sortProps = { sort, order, onSort };
 
   return (

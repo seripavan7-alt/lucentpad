@@ -1,4 +1,8 @@
 import type {
+  GatewaySummary,
+  GatewaySummaryParams,
+  GatewayTurnList,
+  GatewayTurnsParams,
   GetTraceParams,
   ListTracesParams,
   TraceDetail,
@@ -89,6 +93,20 @@ export function getTrace(
     buildUrl(`/v1/traces/${encodeURIComponent(traceId)}`, params),
     signal,
   );
+}
+
+export function listGatewayTurns(
+  params: GatewayTurnsParams = {},
+  signal?: AbortSignal,
+): Promise<GatewayTurnList> {
+  return getJson<GatewayTurnList>(buildUrl("/v1/gateway/turns", params), signal);
+}
+
+export function getGatewaySummary(
+  params: GatewaySummaryParams = {},
+  signal?: AbortSignal,
+): Promise<GatewaySummary> {
+  return getJson<GatewaySummary>(buildUrl("/v1/gateway/summary", params), signal);
 }
 
 export function getHealth(signal?: AbortSignal): Promise<Record<string, string>> {

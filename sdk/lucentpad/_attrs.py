@@ -25,6 +25,8 @@ class Attr:
     GEN_AI_RESPONSE_MODEL: Final = "gen_ai.response.model"
     GEN_AI_INPUT_TOKENS: Final = "gen_ai.usage.input_tokens"
     GEN_AI_OUTPUT_TOKENS: Final = "gen_ai.usage.output_tokens"
+    GEN_AI_CACHE_READ_TOKENS: Final = "gen_ai.usage.cache_read.input_tokens"
+    GEN_AI_CACHE_CREATION_TOKENS: Final = "gen_ai.usage.cache_creation.input_tokens"
     GEN_AI_FINISH_REASONS: Final = "gen_ai.response.finish_reasons"
     GEN_AI_TOOL_NAME: Final = "gen_ai.tool.name"
     STREAMING: Final = "lucentpad.streaming"

@@ -1,7 +1,8 @@
 """The static demo's data, built from the real API over the deterministic sample.
 
 ``dashboard/src/demo/snapshot.json`` holds every trace summary and span; ``parity.json`` records
-how the real API pages a set of list queries, so the dashboard's in-browser adapter can be checked
+how the real API pages a set of list queries (traces and gateway turns), facet counts and gateway
+summaries, so the dashboard's in-browser adapter can be checked
 against it (``src/demo/adapter.test.ts``). Run ``make demo-snapshot`` to rewrite both files;
 otherwise this test fails when the committed files have drifted from the API.
 """
@@ -82,6 +83,56 @@ FACET_PARITY_QUERIES: list[dict[str, Any]] = [
     {"from": _ago(days=3), "to": _ago(days=1), "service": "support-agent"},
 ]
 
+# Gateway page queries (`GET /v1/gateway/turns`, paged; `GET /v1/gateway/summary`) the adapter
+# must reproduce exactly. Turns are newest first by (start_time, span_id, trace_id).
+GATEWAY_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"limit": 200},
+    {"limit": 13},
+    {"client": "claude-code", "limit": 40},
+    {"client": ["copilot-chat", "copilot-cli"], "limit": 25},
+    {"client": "nope"},
+    {"from": _ago(days=2)},
+    {"to": _ago(days=5), "limit": 30},
+    {"from": _ago(days=4), "to": _ago(days=3), "client": "copilot-chat", "limit": 5},
+]
+GATEWAY_SUMMARY_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"from": _ago(days=1)},
+    {"to": _ago(days=6)},
+    {"from": _ago(days=4), "to": _ago(days=2)},
+    {"from": NOW.isoformat()},
+]
+
+
+async def _gateway_pages(client: httpx.AsyncClient, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every page of a gateway turns query, as span ids plus whether another page follows."""
+    pages: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        r = await client.get(
+            "/v1/gateway/turns", params={**params, **({"cursor": cursor} if cursor else {})}
+        )
+        r.raise_for_status()
+        body = r.json()
+        pages.append(
+            {
+                "span_ids": [t["span_id"] for t in body["turns"]],
+                "has_next": body["next_cursor"] is not None,
+            }
+        )
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return pages
+
+
+async def _gateway_summary(client: httpx.AsyncClient, params: dict[str, Any]) -> dict[str, Any]:
+    r = await client.get("/v1/gateway/summary", params=params)
+    r.raise_for_status()
+    body: dict[str, Any] = r.json()
+    body.pop("as_of")
+    return body
+
 
 async def _pages(client: httpx.AsyncClient, params: dict[str, Any]) -> list[dict[str, Any]]:
     """Every page of a list query, as trace ids plus whether another page follows."""
@@ -124,6 +175,13 @@ async def _build(client: httpx.AsyncClient) -> tuple[dict[str, Any], dict[str, A
     parity = {
         "queries": [{"params": q, "pages": await _pages(client, q)} for q in PARITY_QUERIES],
         "facets": facets,
+        "gateway_turns": [
+            {"params": q, "pages": await _gateway_pages(client, q)} for q in GATEWAY_PARITY_QUERIES
+        ],
+        "gateway_summary": [
+            {"params": q, "summary": await _gateway_summary(client, q)}
+            for q in GATEWAY_SUMMARY_PARITY_QUERIES
+        ],
     }
     return snapshot, parity
 

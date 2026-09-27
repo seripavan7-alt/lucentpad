@@ -4,6 +4,54 @@
  */
 
 export interface paths {
+    "/gateway/anthropic/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Anthropic API, proxied (Claude Code, Copilot CLI)
+         * @description Set `ANTHROPIC_BASE_URL` (Claude Code) or `COPILOT_PROVIDER_BASE_URL` with `COPILOT_PROVIDER_TYPE=anthropic` (Copilot CLI) to `<host>/gateway/anthropic`. Forwards `v1/messages`, `v1/messages/count_tokens` and `v1/models`; bodies and streams pass through unchanged. The client's key is forwarded, never stored.
+         */
+        get: operations["gateway_anthropic_get"];
+        put?: never;
+        /**
+         * Anthropic API, proxied (Claude Code, Copilot CLI)
+         * @description Set `ANTHROPIC_BASE_URL` (Claude Code) or `COPILOT_PROVIDER_BASE_URL` with `COPILOT_PROVIDER_TYPE=anthropic` (Copilot CLI) to `<host>/gateway/anthropic`. Forwards `v1/messages`, `v1/messages/count_tokens` and `v1/models`; bodies and streams pass through unchanged. The client's key is forwarded, never stored.
+         */
+        post: operations["gateway_anthropic_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gateway/openai/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OpenAI API, proxied (Copilot Chat Custom Endpoint, Copilot CLI)
+         * @description Use `<host>/gateway/openai/v1` as the OpenAI-compatible base URL. Forwards `v1/chat/completions` and `v1/models`; bodies and streams pass through unchanged.
+         */
+        get: operations["gateway_openai_get"];
+        put?: never;
+        /**
+         * OpenAI API, proxied (Copilot Chat Custom Endpoint, Copilot CLI)
+         * @description Use `<host>/gateway/openai/v1` as the OpenAI-compatible base URL. Forwards `v1/chat/completions` and `v1/models`; bodies and streams pass through unchanged.
+         */
+        post: operations["gateway_openai_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -13,6 +61,46 @@ export interface paths {
         };
         /** Healthz */
         get: operations["healthz_healthz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/gateway/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gateway Summary
+         * @description Per-client sessions, turns, tokens and cost over the window.
+         */
+        get: operations["gateway_summary_v1_gateway_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/gateway/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gateway Turns
+         * @description Gateway model calls, newest first.
+         */
+        get: operations["gateway_turns_v1_gateway_turns_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -124,6 +212,103 @@ export interface components {
             count: number;
             /** Value */
             value: string;
+        };
+        /** GatewayClientTotals */
+        GatewayClientTotals: {
+            /** Client */
+            client: string;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Sessions */
+            sessions: number;
+            /** Turns */
+            turns: number;
+        };
+        /**
+         * GatewaySummary
+         * @description Per-client totals over a time window, most expensive first.
+         */
+        GatewaySummary: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Clients */
+            clients: components["schemas"]["GatewayClientTotals"][];
+        };
+        /**
+         * GatewayTurn
+         * @description One model call through the gateway (a ``kind=llm`` span with ``source=gateway``).
+         */
+        GatewayTurn: {
+            /**
+             * Client
+             * @description `claude-code`, `copilot-cli`, `copilot-chat` or `other`.
+             */
+            client: string | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /**
+             * Failover
+             * @description True when the request was retried on a fallback model.
+             */
+            failover: boolean;
+            /** Input Preview */
+            input_preview: string | null;
+            /** Input Tokens */
+            input_tokens: number | null;
+            /** Model */
+            model: string | null;
+            /** Output Preview */
+            output_preview: string | null;
+            /** Output Tokens */
+            output_tokens: number | null;
+            /** Provider */
+            provider: ("anthropic" | "openai") | null;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Start Time
+             * Format: date-time
+             */
+            start_time: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "error" | "blocked";
+            /** Streaming */
+            streaming: boolean;
+            /**
+             * Trace Id
+             * @description The session trace this turn belongs to.
+             */
+            trace_id: string;
+            /** Ttfb Ms */
+            ttfb_ms: number | null;
+        };
+        /** GatewayTurnList */
+        GatewayTurnList: {
+            /**
+             * As Of
+             * Format: date-time
+             * @description Server time; pass it as `since` on the next live poll.
+             */
+            as_of: string;
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Turns
+             * @description Newest first.
+             */
+            turns: components["schemas"]["GatewayTurn"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -361,6 +546,122 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    gateway_anthropic_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_anthropic_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_openai_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_openai_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     healthz_healthz_get: {
         parameters: {
             query?: never;
@@ -379,6 +680,94 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    gateway_summary_v1_gateway_summary_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewaySummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    gateway_turns_v1_gateway_turns_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                /** @description Repeat for OR. */
+                client?: string[] | null;
+                limit?: number;
+                cursor?: string | null;
+                /** @description Live polling: turns stored after this time (previous `as_of`). */
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayTurnList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

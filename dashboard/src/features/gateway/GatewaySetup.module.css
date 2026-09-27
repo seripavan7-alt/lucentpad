@@ -1,0 +1,140 @@
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-6);
+}
+
+@media (max-width: 720px) {
+  .setup {
+    padding: var(--space-6) var(--space-4);
+  }
+}
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 64ch;
+  color: var(--color-text-secondary);
+}
+
+.title {
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+/* One client per row, so each setup line fits on one line at laptop width. */
+.clients {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 720px;
+}
+
+.client {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.clientTitle {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.client code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 1.4em;
+  list-style: decimal;
+}
+
+.steps li::marker {
+  color: var(--color-text-tertiary);
+}
+
+.steps strong {
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.code {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: 5px 5px 5px var(--space-3);
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.code pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 3px 0;
+  color: var(--color-text);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+}
+
+/* Wrap long URLs instead of hiding them behind a scrollbar; copying keeps the real lines. */
+.code pre code {
+  font-size: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.copy {
+  flex: none;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.copy:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.copy[data-state="copied"] {
+  color: var(--color-ok);
+}
+
+.copy[data-state="failed"] {
+  color: var(--color-error);
+}
+
+.note {
+  max-width: 72ch;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}

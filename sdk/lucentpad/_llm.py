@@ -38,8 +38,10 @@ class LLMCall:
         self.capture = bool(cfg and cfg.capture_content)
         self.output = PreviewBuilder()
         self.response_model: str | None = None
-        self.input_tokens: int | None = None
+        self.input_tokens: int | None = None  # all input, cached included
         self.output_tokens: int | None = None
+        self.cache_read_tokens: int | None = None
+        self.cache_creation_tokens: int | None = None
         self.finish_reasons: list[str] = []
         self._done = False
         self._lock = threading.Lock()
@@ -71,6 +73,10 @@ class LLMCall:
                 a[Attr.GEN_AI_INPUT_TOKENS] = int(self.input_tokens)
             if self.output_tokens is not None:
                 a[Attr.GEN_AI_OUTPUT_TOKENS] = int(self.output_tokens)
+            if self.cache_read_tokens is not None:
+                a[Attr.GEN_AI_CACHE_READ_TOKENS] = int(self.cache_read_tokens)
+            if self.cache_creation_tokens is not None:
+                a[Attr.GEN_AI_CACHE_CREATION_TOKENS] = int(self.cache_creation_tokens)
             if self.finish_reasons:
                 a[Attr.GEN_AI_FINISH_REASONS] = list(self.finish_reasons)
             if self.capture and not self.output.empty:

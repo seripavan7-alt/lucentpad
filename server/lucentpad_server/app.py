@@ -9,10 +9,13 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 
 from lucentpad_server import db, sample
+from lucentpad_server.gateway import GatewayProxy
+from lucentpad_server.gateway.config import GatewayConfig
+from lucentpad_server.gateway.proxy import HttpGatewayProxy
 from lucentpad_server.ingest import IngestPipeline
 from lucentpad_server.ingest.body_limit import BodyLimitMiddleware, max_body_from_env
 from lucentpad_server.ingest.queue import InProcessSpanQueue, queue_max_from_env
@@ -20,6 +23,9 @@ from lucentpad_server.ingest.writer import QueuedIngest, drain_timeout_from_env
 from lucentpad_server.query import TraceFilter
 from lucentpad_server.schema import (
     ErrorResponse,
+    GatewayProvider,
+    GatewaySummary,
+    GatewayTurnList,
     IngestAccepted,
     IngestStats,
     SpanBatch,
@@ -109,9 +115,14 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
             ingest = QueuedIngest(store, InProcessSpanQueue(queue_max_from_env()))
             ingest.start()
             app.state.ingest = ingest
+            # Gateway settings: see lucentpad_server/gateway/config.py (LUCENTPAD_* env vars).
+            gateway = HttpGatewayProxy(GatewayConfig.from_env(), ingest)
+            app.state.gateway = gateway
             try:
                 yield
             finally:
+                app.state.gateway = None
+                await gateway.aclose()  # offers pending gateway spans before ingest drains
                 app.state.ingest = None
                 await ingest.stop(drain_timeout_from_env())
         finally:
@@ -248,5 +259,118 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
         if detail is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "trace not found")
         return detail
+
+    # ------------------------------------------------------------------ gateway (M2)
+
+    def get_gateway(request: Request) -> GatewayProxy:
+        gateway: GatewayProxy | None = getattr(request.app.state, "gateway", None)
+        if gateway is None:
+            raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "gateway not running")
+        return gateway
+
+    async def _forward(provider: GatewayProvider, path: str, request: Request) -> Response:
+        return await get_gateway(request).forward(provider, path, request)
+
+    @app.post(
+        "/gateway/anthropic/{path:path}",
+        tags=["gateway"],
+        operation_id="gateway_anthropic_post",
+        summary="Anthropic API, proxied (Claude Code, Copilot CLI)",
+        description="Set `ANTHROPIC_BASE_URL` (Claude Code) or `COPILOT_PROVIDER_BASE_URL` with "
+        "`COPILOT_PROVIDER_TYPE=anthropic` (Copilot CLI) to `<host>/gateway/anthropic`. Forwards "
+        "`v1/messages`, `v1/messages/count_tokens` and `v1/models`; bodies and streams pass "
+        "through unchanged. The client's key is forwarded, never stored.",
+        response_class=Response,
+    )
+    @app.get(
+        "/gateway/anthropic/{path:path}",
+        tags=["gateway"],
+        operation_id="gateway_anthropic_get",
+        summary="Anthropic API, proxied (Claude Code, Copilot CLI)",
+        description="Set `ANTHROPIC_BASE_URL` (Claude Code) or `COPILOT_PROVIDER_BASE_URL` with "
+        "`COPILOT_PROVIDER_TYPE=anthropic` (Copilot CLI) to `<host>/gateway/anthropic`. Forwards "
+        "`v1/messages`, `v1/messages/count_tokens` and `v1/models`; bodies and streams pass "
+        "through unchanged. The client's key is forwarded, never stored.",
+        response_class=Response,
+    )
+    async def gateway_anthropic(path: str, request: Request) -> Response:
+        return await _forward("anthropic", path, request)
+
+    @app.post(
+        "/gateway/openai/{path:path}",
+        tags=["gateway"],
+        operation_id="gateway_openai_post",
+        summary="OpenAI API, proxied (Copilot Chat Custom Endpoint, Copilot CLI)",
+        description="Use `<host>/gateway/openai/v1` as the OpenAI-compatible base URL. Forwards "
+        "`v1/chat/completions` and `v1/models`; bodies and streams pass through unchanged.",
+        response_class=Response,
+    )
+    @app.get(
+        "/gateway/openai/{path:path}",
+        tags=["gateway"],
+        operation_id="gateway_openai_get",
+        summary="OpenAI API, proxied (Copilot Chat Custom Endpoint, Copilot CLI)",
+        description="Use `<host>/gateway/openai/v1` as the OpenAI-compatible base URL. Forwards "
+        "`v1/chat/completions` and `v1/models`; bodies and streams pass through unchanged.",
+        response_class=Response,
+    )
+    async def gateway_openai(path: str, request: Request) -> Response:
+        return await _forward("openai", path, request)
+
+    @app.get(
+        "/v1/gateway/turns",
+        tags=["query"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def gateway_turns(
+        request: Request,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+        client: Annotated[list[str] | None, Query(description="Repeat for OR.")] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+        since: Annotated[
+            datetime | None,
+            Query(description="Live polling: turns stored after this time (previous `as_of`)."),
+        ] = None,
+    ) -> GatewayTurnList:
+        """Gateway model calls, newest first."""
+        for label, value in (("from", start), ("to", end), ("since", since)):
+            if value is not None and value.tzinfo is None:
+                raise _invalid(label, "timestamp must include a timezone")
+        if since is not None and cursor is not None:
+            raise _invalid("cursor", "cursor cannot be combined with since")
+        try:
+            return await get_store(request).gateway_turns(
+                start=start,
+                end=end,
+                clients=tuple(client or ()),
+                limit=limit,
+                cursor=cursor,
+                since=since,
+            )
+        except InvalidCursorError:
+            raise _invalid("cursor", "invalid cursor") from None
+        except NotImplementedError as exc:
+            raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from None
+
+    @app.get(
+        "/v1/gateway/summary",
+        tags=["query"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def gateway_summary(
+        request: Request,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+    ) -> GatewaySummary:
+        """Per-client sessions, turns, tokens and cost over the window."""
+        for label, value in (("from", start), ("to", end)):
+            if value is not None and value.tzinfo is None:
+                raise _invalid(label, "timestamp must include a timezone")
+        try:
+            return await get_store(request).gateway_summary(start=start, end=end)
+        except NotImplementedError as exc:
+            raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from None
 
     return app

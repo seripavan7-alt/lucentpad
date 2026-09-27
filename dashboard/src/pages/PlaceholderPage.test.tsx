@@ -7,7 +7,6 @@ import { getLocation, mockFetch, renderApp } from "../test/render";
 describe("Shell and placeholder pages", () => {
   it.each([
     ["/costs", "Costs", "Arrives in M3"],
-    ["/gateway", "Gateway", "Arrives in M2"],
     ["/guardrails", "Guardrails", "Arrives in M3"],
     ["/evals", "Evals", "Arrives in M3"],
   ])("%s renders its placeholder", (route, title, badge) => {

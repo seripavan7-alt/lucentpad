@@ -96,6 +96,7 @@ const CLIENT_LABELS: Record<string, string> = {
   "copilot-chat": "Copilot Chat",
   "copilot-cli": "Copilot CLI",
   sdk: "SDK",
+  other: "Other",
 };
 
 export function clientLabel(client: string | null | undefined): string | null {

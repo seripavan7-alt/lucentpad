@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { createQueryClient } from "./api/queryClient";
 import { Layout } from "./components/Layout";
+import { GatewayPage } from "./pages/GatewayPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { TraceDetailPage } from "./pages/TraceDetailPage";
@@ -30,16 +31,7 @@ export function AppRoutes() {
             />
           }
         />
-        <Route
-          path="gateway"
-          element={
-            <PlaceholderPage
-              title="Gateway"
-              milestone="M2"
-              description="A live feed of Claude Code and Copilot requests through the LucentPad gateway, with tokens, cost and failovers per turn."
-            />
-          }
-        />
+        <Route path="gateway" element={<GatewayPage />} />
         <Route
           path="guardrails"
           element={

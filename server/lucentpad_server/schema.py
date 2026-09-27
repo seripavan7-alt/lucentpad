@@ -29,6 +29,9 @@ class Attr:
     GEN_AI_RESPONSE_MODEL = "gen_ai.response.model"
     GEN_AI_INPUT_TOKENS = "gen_ai.usage.input_tokens"
     GEN_AI_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+    # Cached input, as subsets of GEN_AI_INPUT_TOKENS (which counts all input, cached included).
+    GEN_AI_CACHE_READ_TOKENS = "gen_ai.usage.cache_read.input_tokens"
+    GEN_AI_CACHE_CREATION_TOKENS = "gen_ai.usage.cache_creation.input_tokens"
     GEN_AI_FINISH_REASONS = "gen_ai.response.finish_reasons"
     GEN_AI_TOOL_NAME = "gen_ai.tool.name"
     COST_USD = "lucentpad.cost_usd"
@@ -54,6 +57,11 @@ class Attr:
     REDACTION_COUNT = "lucentpad.redaction.count"
     # Demo support agent
     REFUND_AMOUNT = "lucentpad.refund.amount"
+    # Gateway (M2)
+    GATEWAY_UPSTREAM = "lucentpad.gateway.upstream"  # "anthropic" | "openai"
+    TTFB_MS = "lucentpad.ttfb_ms"  # time to the first response byte from the upstream
+    # Salted SHA-256 of the client's API key, first 12 hex chars. Groups sessions; never the key.
+    KEY_FINGERPRINT = "lucentpad.key_fingerprint"
 
 
 class EventName:
@@ -87,6 +95,9 @@ SpanStatus = Literal["ok", "error", "blocked"]
 SpanSource = Literal["sdk", "gateway"]
 TraceOrder = Literal["desc", "asc"]
 """Direction of the traces list sort: descending (default) or ascending."""
+GatewayProvider = Literal["anthropic", "openai"]
+"""Upstreams the gateway forwards to: Anthropic Messages API, OpenAI Chat Completions."""
+
 TraceSort = Literal["started", "duration", "name", "source", "cost"]
 """What the traces list sorts by: start time (default), duration, trace name, source or cost.
 Ties break on ``trace_id`` in the same direction, so paging is stable."""
@@ -218,3 +229,48 @@ class TraceFacets(_Model):
     client: list[FacetValue]
     model: list[FacetValue]
     service: list[FacetValue]
+
+
+class GatewayTurn(_Model):
+    """One model call through the gateway (a ``kind=llm`` span with ``source=gateway``)."""
+
+    trace_id: TraceId = Field(description="The session trace this turn belongs to.")
+    span_id: SpanId
+    client: str | None = Field(
+        description="`claude-code`, `copilot-cli`, `copilot-chat` or `other`."
+    )
+    provider: GatewayProvider | None
+    model: str | None
+    start_time: datetime
+    duration_ms: float
+    ttfb_ms: float | None
+    status: SpanStatus
+    streaming: bool
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
+    failover: bool = Field(description="True when the request was retried on a fallback model.")
+    input_preview: str | None
+    output_preview: str | None
+
+
+class GatewayTurnList(_Model):
+    turns: list[GatewayTurn] = Field(description="Newest first.")
+    next_cursor: str | None
+    as_of: datetime = Field(description="Server time; pass it as `since` on the next live poll.")
+
+
+class GatewayClientTotals(_Model):
+    client: str
+    sessions: int
+    turns: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class GatewaySummary(_Model):
+    """Per-client totals over a time window, most expensive first."""
+
+    clients: list[GatewayClientTotals]
+    as_of: datetime

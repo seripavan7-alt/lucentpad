@@ -65,8 +65,7 @@ def _record_completion(call: LLMCall, completion: Any) -> None:
     call.response_model = getattr(completion, "model", None) or call.response_model
     usage = getattr(completion, "usage", None)
     if usage is not None:
-        call.input_tokens = getattr(usage, "prompt_tokens", None)
-        call.output_tokens = getattr(usage, "completion_tokens", None)
+        _record_usage(call, usage)
     choices = getattr(completion, "choices", None) or []
     call.finish_reasons = [
         str(c.finish_reason) for c in choices if getattr(c, "finish_reason", None)
@@ -81,6 +80,15 @@ def _record_completion(call: LLMCall, completion: Any) -> None:
             call.output.add_block(f"[tool_use {getattr(fn, 'name', 'tool')}]")
 
 
+def _record_usage(call: LLMCall, usage: Any) -> None:
+    """``prompt_tokens`` already counts cached input; the cached part is recorded separately."""
+    call.input_tokens = getattr(usage, "prompt_tokens", None)
+    call.output_tokens = getattr(usage, "completion_tokens", None)
+    cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None)
+    if isinstance(cached, int) and not isinstance(cached, bool) and cached:
+        call.cache_read_tokens = cached
+
+
 def _observer(call: LLMCall, hide_usage_chunk: bool) -> Any:
     finish: dict[int, str] = {}
 
@@ -88,8 +96,7 @@ def _observer(call: LLMCall, hide_usage_chunk: bool) -> Any:
         call.response_model = getattr(chunk, "model", None) or call.response_model
         usage = getattr(chunk, "usage", None)
         if usage is not None:
-            call.input_tokens = getattr(usage, "prompt_tokens", None)
-            call.output_tokens = getattr(usage, "completion_tokens", None)
+            _record_usage(call, usage)
         choices = getattr(chunk, "choices", None) or []
         for choice in choices:
             index = getattr(choice, "index", 0)

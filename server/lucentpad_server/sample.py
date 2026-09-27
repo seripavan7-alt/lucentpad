@@ -228,8 +228,10 @@ def _llm_attrs(
     service: str,
     client: str,
     streaming: bool,
+    cache_read: int = 0,
+    cache_write: int = 0,
 ) -> Attributes:
-    cost = cost_usd(response_model, input_tokens, output_tokens)
+    cost = cost_usd(response_model, input_tokens, output_tokens, cache_read, cache_write)
     attrs: Attributes = {
         Attr.SERVICE_NAME: service,
         Attr.CLIENT: client,
@@ -242,6 +244,10 @@ def _llm_attrs(
         Attr.GEN_AI_FINISH_REASONS: [finish],
         Attr.STREAMING: streaming,
     }
+    if cache_read:
+        attrs[Attr.GEN_AI_CACHE_READ_TOKENS] = cache_read
+    if cache_write:
+        attrs[Attr.GEN_AI_CACHE_CREATION_TOKENS] = cache_write
     if cost is not None:
         attrs[Attr.COST_USD] = cost
     return attrs
@@ -592,6 +598,14 @@ def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str
             out_tok = rng.randint(0, out_tok // 3)
             latency = ttft + out_tok * 12
             finish = "error"
+        # Claude Code caches its long context: the first turn writes it, later turns read it.
+        # (Text RNG, so the main sample stream is unchanged.)
+        cache_read = cache_write = 0
+        if client == "claude-code" and not side:
+            if turn == 0:
+                cache_write = int(in_tok * trng.uniform(0.6, 0.8))
+            else:
+                cache_read = int(in_tok * trng.uniform(0.75, 0.92))
         attrs = _llm_attrs(
             system=system,
             request_model=model,
@@ -602,8 +616,12 @@ def _gateway_session(rng: random.Random, ids: _Ids, start: datetime, client: str
             service=GATEWAY_SERVICE,
             client=client,
             streaming=True,
+            cache_read=cache_read,
+            cache_write=cache_write,
         )
         attrs[Attr.SESSION_ID] = session
+        attrs[Attr.GATEWAY_UPSTREAM] = system
+        attrs[Attr.TTFB_MS] = round(ttft, 1)
         prompt: str
         if turn == 0:
             prompt = first_prompt = rng.choice(_CODING_PROMPTS)

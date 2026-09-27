@@ -36,9 +36,8 @@ export const STEPS: [Step, ...Step[]] = [
   {
     id: "gateway",
     label: "Claude Code & Copilot",
-    soon: "next",
     intro:
-      "Coming next: point Claude Code or Copilot at the gateway and each session shows up with the cost of every turn.",
-    code: `ANTHROPIC_BASE_URL=http://localhost:8000/gateway/anthropic claude`,
+      "Point Claude Code at the gateway and each session shows up with the cost of every turn. Copilot works too, when it uses your own API key.",
+    code: `export ANTHROPIC_BASE_URL=http://localhost:8000/gateway/anthropic\nclaude\n\n# Copilot CLI, with your own key\nexport COPILOT_PROVIDER_TYPE=anthropic\nexport COPILOT_PROVIDER_BASE_URL=http://localhost:8000/gateway/anthropic\nexport COPILOT_PROVIDER_API_KEY="$ANTHROPIC_API_KEY"\ncopilot`,
   },
 ];

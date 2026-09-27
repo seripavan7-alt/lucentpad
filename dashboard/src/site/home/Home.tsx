@@ -28,8 +28,8 @@ const TRY_THIS = ["tick Error under Status", "sort by Cost", "open a run to see 
 const ROADMAP: [string, string, "done" | "next" | "later"][] = [
   ["Dashboard, sample data, CI", "M0", "done"],
   ["Python SDK and the live waterfall", "M1", "done"],
-  ["Gateway for Claude Code and Copilot", "M2", "next"],
-  ["Guardrails, budgets, cost reports, eval gate", "M3", "later"],
+  ["Gateway for Claude Code and Copilot", "M2", "done"],
+  ["Guardrails, budgets, cost reports, eval gate", "M3", "next"],
   ["Hosted demo, docs and a short video", "M4", "later"],
 ];
 
@@ -96,7 +96,7 @@ export function Home() {
               </a>
             </div>
             <p className={styles.meta}>
-              Python SDK for Anthropic and OpenAI · Claude Code and Copilot next · Apache-2.0
+              Python SDK for Anthropic and OpenAI · Gateway for Claude Code and Copilot · Apache-2.0
             </p>
           </div>
           <Receipt />

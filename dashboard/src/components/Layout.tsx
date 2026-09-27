@@ -18,7 +18,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/traces", label: "Traces", Icon: TracesIcon },
   { to: "/costs", label: "Costs", Icon: CostsIcon, milestone: "M3" },
-  { to: "/gateway", label: "Gateway", Icon: GatewayIcon, milestone: "M2" },
+  { to: "/gateway", label: "Gateway", Icon: GatewayIcon },
   { to: "/guardrails", label: "Guardrails", Icon: GuardrailsIcon, milestone: "M3" },
   { to: "/evals", label: "Evals", Icon: EvalsIcon, milestone: "M3" },
 ];

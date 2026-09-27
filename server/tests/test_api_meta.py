@@ -57,6 +57,10 @@ def test_openapi_without_database() -> None:
         "/v1/traces",
         "/v1/traces/facets",
         "/v1/traces/{trace_id}",
+        "/v1/gateway/turns",
+        "/v1/gateway/summary",
+        "/gateway/anthropic/{path}",
+        "/gateway/openai/{path}",
     }
 
 

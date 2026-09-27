@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 from collections.abc import Iterable, Sequence
@@ -27,7 +28,13 @@ from lucentpad_server.schema import (
     PREVIEW_MAX_CHARS,
     Attr,
     Attributes,
+    EventName,
     FacetValue,
+    GatewayClientTotals,
+    GatewayProvider,
+    GatewaySummary,
+    GatewayTurn,
+    GatewayTurnList,
     Span,
     TraceDetail,
     TraceFacets,
@@ -364,7 +371,13 @@ def _extract(span: Span) -> tuple[str | None, int | None, int | None, float | No
     if isinstance(raw_cost, int | float) and not isinstance(raw_cost, bool):
         cost = float(raw_cost)
     elif model is not None and (in_tok is not None or out_tok is not None):
-        cost = cost_usd(model, in_tok or 0, out_tok or 0)
+        cost = cost_usd(
+            model,
+            in_tok or 0,
+            out_tok or 0,
+            _int_attr(attrs, Attr.GEN_AI_CACHE_READ_TOKENS) or 0,
+            _int_attr(attrs, Attr.GEN_AI_CACHE_CREATION_TOKENS) or 0,
+        )
     return model, in_tok, out_tok, cost
 
 
@@ -452,6 +465,185 @@ def _with_cost(attributes: dict[str, Any], cost: Decimal | None) -> dict[str, An
     if cost is None or Attr.COST_USD in attributes:
         return attributes
     return {**attributes, Attr.COST_USD: float(cost)}
+
+
+# --------------------------------------------------------------------------- gateway (M2)
+
+
+def _sql_str(value: str) -> str:
+    """A fixed attribute key as a SQL literal (inlined so the partial/expression indexes of
+    migration 0004 match the query text)."""
+    if "'" in value or "\\" in value:
+        raise ValueError(value)
+    return f"'{value}'"
+
+
+# The partial-index predicate of migration 0004: a gateway turn.
+_GW_TURN = "source = 'gateway' AND kind = 'llm'"
+# Client of a turn: the span's own attribute (the gateway sets it on every span it writes).
+_GW_CLIENT = f"(attributes ->> {_sql_str(Attr.CLIENT)})"
+_GW_FAILOVER = json.dumps([{"name": EventName.FAILOVER}])
+_GW_TURN_COLUMNS = f"""
+    trace_id, span_id, start_time, status, model, input_tokens, output_tokens, cost_usd,
+    {_GW_CLIENT} AS client,
+    attributes ->> {_sql_str(Attr.GATEWAY_UPSTREAM)} AS upstream,
+    attributes ->> {_sql_str(Attr.GEN_AI_SYSTEM)} AS system,
+    attributes -> {_sql_str(Attr.TTFB_MS)} AS ttfb_ms,
+    attributes -> {_sql_str(Attr.STREAMING)} AS streaming,
+    attributes ->> {_sql_str(Attr.INPUT_PREVIEW)} AS input_preview,
+    attributes ->> {_sql_str(Attr.OUTPUT_PREVIEW)} AS output_preview,
+    EXTRACT(EPOCH FROM (end_time - start_time)) * 1000 AS duration_ms,
+    events @> {_sql_str(_GW_FAILOVER)}::jsonb AS failover
+"""
+_PROVIDERS: Final[dict[str, GatewayProvider]] = {"anthropic": "anthropic", "openai": "openai"}
+
+
+def _gateway_window(start: datetime | None, end: datetime | None, args: list[Any]) -> list[str]:
+    where = [_GW_TURN]
+    if start is not None:
+        args.append(start)
+        where.append(f"start_time >= ${len(args)}")
+    if end is not None:
+        args.append(end)
+        where.append(f"start_time < ${len(args)}")
+    return where
+
+
+def _gateway_fingerprint(
+    start: datetime | None, end: datetime | None, clients: tuple[str, ...]
+) -> str:
+    data = {
+        "from": start.isoformat() if start else None,
+        "to": end.isoformat() if end else None,
+        "client": sorted(set(clients)),
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class GatewayCursor:
+    """Keyset position after the last turn of a page (newest first), bound to its filters."""
+
+    start_time: datetime
+    span_id: str
+    trace_id: str
+    fingerprint: str
+
+    def encode(self) -> str:
+        raw = json.dumps(
+            {
+                "g": 1,
+                "k": self.start_time.isoformat(),
+                "s": self.span_id,
+                "t": self.trace_id,
+                "f": self.fingerprint,
+            }
+        ).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    @classmethod
+    def decode(cls, token: str) -> GatewayCursor:
+        try:
+            data = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+            if data["g"] != 1:
+                raise ValueError("not a gateway cursor")
+            start_time = datetime.fromisoformat(data["k"])
+            span_id, trace_id, fingerprint = data["s"], data["t"], data["f"]
+        except (binascii.Error, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        if start_time.tzinfo is None or not all(
+            isinstance(v, str) for v in (span_id, trace_id, fingerprint)
+        ):
+            raise InvalidCursorError("invalid cursor")
+        return cls(start_time, span_id, trace_id, fingerprint)
+
+
+_GW_ORDER = "ORDER BY start_time DESC, span_id DESC, trace_id DESC"
+
+
+def _gateway_turns_sql(
+    start: datetime | None,
+    end: datetime | None,
+    clients: tuple[str, ...],
+    since: datetime | None,
+    after: GatewayCursor | None,
+    limit: int,
+) -> tuple[str, list[Any]]:
+    """The turns query and its parameters. A client filter becomes one ordered, limited branch
+    per client (``client = $n``, served in page order by ``spans_gateway_client_idx``) merged by
+    the outer ORDER BY: Postgres 16 can't keep index order for ``= ANY(...)``, so a filter on a
+    rare client would otherwise sort every matching turn."""
+    args: list[Any] = []
+    where = _gateway_window(start, end, args)
+    if since is not None:
+        args.append(since - LIVE_OVERLAP)
+        where.append(f"stored_at > ${len(args)}")
+    if after is not None:
+        args += [after.start_time, after.span_id, after.trace_id]
+        n = len(args)
+        where.append(f"(start_time, span_id, trace_id) < (${n - 2}::timestamptz, ${n - 1}, ${n})")
+    args.append(limit)
+    limit_sql = f"LIMIT ${len(args)}"
+    select = f"SELECT {_GW_TURN_COLUMNS} FROM spans"  # noqa: S608 - fixed fragments
+    if not clients:
+        plain = f"SELECT {_GW_TURN_COLUMNS}, now() AS as_of FROM spans"  # noqa: S608
+        return f"{plain}{_where(where)} {_GW_ORDER} {limit_sql}", args
+    branches: list[str] = []
+    for client in sorted(set(clients)):
+        args.append(client)
+        cond = [*where, f"{_GW_CLIENT} = ${len(args)}"]
+        branches.append(f"({select}{_where(cond)} {_GW_ORDER} {limit_sql})")
+    union = " UNION ALL ".join(branches)
+    return f"SELECT *, now() AS as_of FROM ({union}) AS u {_GW_ORDER} {limit_sql}", args  # noqa: S608
+
+
+def _gateway_summary_sql(start: datetime | None, end: datetime | None) -> tuple[str, list[Any]]:
+    """Per-client totals: first per (client, trace) (hash aggregate, no DISTINCT sort), then
+    per client. Most expensive first, ties by client in code point order."""
+    args: list[Any] = []
+    where = _gateway_window(start, end, args)
+    sql = (
+        "SELECT client, count(*) AS sessions, sum(turns) AS turns,"  # noqa: S608 - fixed fragments
+        " sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,"
+        " sum(cost_usd) AS cost_usd FROM ("
+        f"SELECT coalesce({_GW_CLIENT}, 'other') AS client, trace_id, count(*) AS turns,"
+        " coalesce(sum(input_tokens), 0) AS input_tokens,"
+        " coalesce(sum(output_tokens), 0) AS output_tokens,"
+        " coalesce(sum(cost_usd), 0) AS cost_usd"
+        f" FROM spans{_where(where)} GROUP BY 1, 2"
+        ') AS per_trace GROUP BY client ORDER BY cost_usd DESC, client COLLATE "C"'
+    )
+    return sql, args
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _gateway_turn(row: asyncpg.Record) -> GatewayTurn:
+    upstream, system = row["upstream"], row["system"]
+    provider = _PROVIDERS.get(upstream or "") or _PROVIDERS.get(system or "")
+    cost: Decimal | None = row["cost_usd"]
+    return GatewayTurn(
+        trace_id=row["trace_id"],
+        span_id=row["span_id"],
+        client=row["client"],
+        provider=provider,
+        model=row["model"],
+        start_time=row["start_time"],
+        duration_ms=float(row["duration_ms"]),
+        ttfb_ms=_number(row["ttfb_ms"]),
+        status=row["status"],
+        streaming=row["streaming"] is True,
+        input_tokens=row["input_tokens"],
+        output_tokens=row["output_tokens"],
+        cost_usd=None if cost is None else float(cost),
+        failover=row["failover"],
+        input_preview=row["input_preview"],
+        output_preview=row["output_preview"],
+    )
 
 
 class SpanStore:
@@ -629,3 +821,65 @@ class SpanStore:
                     since - LIVE_OVERLAP,
                 )
         return TraceDetail(trace=_summary(row), spans=[_span(r) for r in spans], as_of=row["as_of"])
+
+    # ------------------------------------------------------------------ gateway (M2)
+
+    async def gateway_turns(
+        self,
+        *,
+        start: datetime | None,
+        end: datetime | None,
+        clients: tuple[str, ...],
+        limit: int,
+        cursor: str | None,
+        since: datetime | None,
+    ) -> GatewayTurnList:
+        """Gateway llm spans (one turn each) with ``start_time`` in [start, end), newest first
+        by (start_time, span_id, trace_id), optionally only the given ``lucentpad.client``
+        values (OR). Raises ``InvalidCursorError`` for a cursor from another filter set.
+
+        With ``since`` (live polling): only turns stored after ``since - LIVE_OVERLAP``, at
+        most ``limit`` of them, and never a next cursor.
+        """
+        fingerprint = _gateway_fingerprint(start, end, clients)
+        after = GatewayCursor.decode(cursor) if cursor is not None else None
+        if after is not None and after.fingerprint != fingerprint:
+            raise InvalidCursorError("cursor was issued for another filter set")
+        sql, args = _gateway_turns_sql(start, end, clients, since, after, limit + 1)
+        async with self._pool.acquire() as conn:
+            rows: Sequence[asyncpg.Record] = await conn.fetch(sql, *args)
+            as_of: datetime = rows[0]["as_of"] if rows else await conn.fetchval("SELECT now()")
+        next_cursor = None
+        if len(rows) > limit and since is None:
+            last = rows[limit - 1]
+            next_cursor = GatewayCursor(
+                last["start_time"], last["span_id"], last["trace_id"], fingerprint
+            ).encode()
+        return GatewayTurnList(
+            turns=[_gateway_turn(r) for r in rows[:limit]], next_cursor=next_cursor, as_of=as_of
+        )
+
+    async def gateway_summary(
+        self, *, start: datetime | None, end: datetime | None
+    ) -> GatewaySummary:
+        """Per-client totals over gateway turns with ``start_time`` in [start, end): sessions
+        (distinct traces with a turn in the window), turns, tokens and cost. Most expensive
+        first, ties by client (code point order). Turns without a client count as ``other``."""
+        sql, args = _gateway_summary_sql(start, end)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+            as_of: datetime = await conn.fetchval("SELECT now()")
+        return GatewaySummary(
+            clients=[
+                GatewayClientTotals(
+                    client=r["client"],
+                    sessions=r["sessions"],
+                    turns=r["turns"],
+                    input_tokens=r["input_tokens"],
+                    output_tokens=r["output_tokens"],
+                    cost_usd=float(r["cost_usd"]),
+                )
+                for r in rows
+            ],
+            as_of=as_of,
+        )

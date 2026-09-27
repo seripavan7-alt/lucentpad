@@ -1,0 +1,26 @@
+.body {
+  min-width: 0;
+  padding: 0 0 var(--space-8);
+}
+
+/* "Turns" + the client filter, lined up with the tiles above and the table below. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-6) var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .toolbar {
+    padding-inline: var(--space-4);
+  }
+}
+
+.feedTitle {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}

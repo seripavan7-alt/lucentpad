@@ -127,7 +127,10 @@ def test_costs_match_price_table(spans: list[Span]) -> None:
         in_tok = s.attributes[Attr.GEN_AI_INPUT_TOKENS]
         out_tok = s.attributes[Attr.GEN_AI_OUTPUT_TOKENS]
         assert isinstance(in_tok, int) and isinstance(out_tok, int)
-        assert s.attributes[Attr.COST_USD] == cost_usd(model, in_tok, out_tok)
+        read = s.attributes.get(Attr.GEN_AI_CACHE_READ_TOKENS, 0)
+        write = s.attributes.get(Attr.GEN_AI_CACHE_CREATION_TOKENS, 0)
+        assert isinstance(read, int) and isinstance(write, int)
+        assert s.attributes[Attr.COST_USD] == cost_usd(model, in_tok, out_tok, read, write)
 
 
 def test_pricing() -> None:
@@ -169,3 +172,13 @@ def test_previews(spans: list[Span]) -> None:
     assert any(s.source == "sdk" for s in truncated) and any(
         s.source == "gateway" for s in truncated
     )
+
+
+def test_claude_code_turns_read_from_cache(spans: list[Span]) -> None:
+    turns = [s for s in spans if s.kind == "llm" and s.attributes.get(Attr.CLIENT) == "claude-code"]
+    cached = [s for s in turns if Attr.GEN_AI_CACHE_READ_TOKENS in s.attributes]
+    assert len(cached) > len(turns) / 2
+    for s in cached:
+        read = s.attributes[Attr.GEN_AI_CACHE_READ_TOKENS]
+        total = s.attributes[Attr.GEN_AI_INPUT_TOKENS]
+        assert isinstance(read, int) and isinstance(total, int) and 0 < read < total

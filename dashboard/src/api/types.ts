@@ -13,6 +13,11 @@ export type SpanKind = Span["kind"];
 export type SpanStatus = Span["status"];
 export type SpanSource = Span["source"];
 export type AttrValue = NonNullable<Span["attributes"]>[string];
+export type GatewayTurn = Schemas["GatewayTurn"];
+export type GatewayTurnList = Schemas["GatewayTurnList"];
+export type GatewayClientTotals = Schemas["GatewayClientTotals"];
+export type GatewaySummary = Schemas["GatewaySummary"];
+export type GatewayProvider = NonNullable<GatewayTurn["provider"]>;
 
 export type ListTracesParams = NonNullable<
   operations["list_traces_v1_traces_get"]["parameters"]["query"]
@@ -22,6 +27,12 @@ export type TraceFacetsParams = NonNullable<
 >;
 export type GetTraceParams = NonNullable<
   operations["get_trace_v1_traces__trace_id__get"]["parameters"]["query"]
+>;
+export type GatewayTurnsParams = NonNullable<
+  operations["gateway_turns_v1_gateway_turns_get"]["parameters"]["query"]
+>;
+export type GatewaySummaryParams = NonNullable<
+  operations["gateway_summary_v1_gateway_summary_get"]["parameters"]["query"]
 >;
 export type TraceOrder = NonNullable<ListTracesParams["order"]>;
 export type TraceSort = NonNullable<ListTracesParams["sort"]>;
@@ -87,7 +98,21 @@ export const Attr = {
   REDACTION_COUNT: "lucentpad.redaction.count",
   // Demo support agent
   REFUND_AMOUNT: "lucentpad.refund.amount",
+  // Gateway (M2)
+  GATEWAY_UPSTREAM: "lucentpad.gateway.upstream",
+  TTFB_MS: "lucentpad.ttfb_ms",
+  KEY_FINGERPRINT: "lucentpad.key_fingerprint",
 } as const;
+
+/** The clients the gateway recognises (`GatewayTurn.client`), in display order. */
+export const GATEWAY_CLIENTS = ["claude-code", "copilot-chat", "copilot-cli", "other"] as const;
+export type GatewayClient = (typeof GATEWAY_CLIENTS)[number];
+
+/** Upstreams the gateway forwards to; mirrors `GatewayProvider` in schema.py. */
+export const GATEWAY_PROVIDERS = [
+  "anthropic",
+  "openai",
+] as const satisfies readonly GatewayProvider[];
 
 /** Event names; mirrors `EventName` in server/lucentpad_server/schema.py. */
 export const EventName = {

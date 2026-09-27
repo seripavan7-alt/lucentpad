@@ -4,7 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { setFetcher } from "../api/client";
 import { AppRoutes } from "../App";
-import { createDemoFetch, freshShift, shiftSnapshot, type DemoSnapshot } from "./adapter";
+import {
+  createDemoFetch,
+  createLiveDemoFetch,
+  freshShift,
+  shiftSnapshot,
+  type DemoSnapshot,
+} from "./adapter";
 import { DemoModeContext } from "./context";
 import snapshotJson from "./snapshot.json";
 
@@ -47,5 +53,23 @@ describe("Dashboard in demo mode", () => {
     const panel = screen.getByRole("complementary", { name: "Filters" });
     await userEvent.click(within(panel).getByRole("button", { name: "Name" }));
     expect(await within(panel).findByRole("checkbox", { name: "support-agent.run" })).toBeVisible();
+  });
+
+  it("shows sample gateway sessions on the Gateway page, not the setup empty state", async () => {
+    setFetcher(createLiveDemoFetch(snapshot));
+    render(
+      <DemoModeContext.Provider value={{ siteHref: "/lucentpad/" }}>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={["/gateway"]}>
+            <AppRoutes />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </DemoModeContext.Provider>,
+    );
+    const table = await screen.findByRole("table");
+    expect(table.querySelectorAll("tbody[data-session-id]").length).toBeGreaterThan(1);
+    expect(screen.queryByText(/No gateway traffic/)).not.toBeInTheDocument();
+    const totals = screen.getByRole("region", { name: "Totals by client" });
+    expect((await within(totals).findAllByText(/^[1-9]\d* sessions?/)).length).toBeGreaterThan(0);
   });
 });

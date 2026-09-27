@@ -7,8 +7,8 @@ latency, cost and guardrail events. It connects two ways:
 - **Gateway mode:** point Claude Code or Copilot at LucentPad's gateway; it forwards traffic to the
   provider and records each turn on the way through.
 
-> **Project status:** LucentPad is being built in the open. The dashboard, the Python SDK and the
-> demo agent work today. The gateway for Claude Code and Copilot arrives in milestone M2.
+> **Project status:** LucentPad is being built in the open. The dashboard, the Python SDK, the demo
+> agent and the gateway for Claude Code and Copilot work today. Guardrails, budgets and evals are next.
 
 ## 1. Run it locally
 
@@ -34,7 +34,7 @@ runs and Claude Code / Copilot sessions, including errors, a guardrail block and
 - **Trace detail** shows the waterfall: every model call and tool step on one time axis, drawing live
   while the run is going, with the cost of each model call. Click a span to see its tokens, cost,
   latency, input and output.
-- **Costs, Gateway, Guardrails, Evals** are placeholders until milestones M2 and M3.
+- **Gateway** shows Claude Code and Copilot sessions turn by turn. **Costs, Guardrails, Evals** arrive in M3.
 
 ## 3. Watch the demo agent
 
@@ -69,16 +69,18 @@ with lucentpad.trace("refund request"):
 Mark tool steps with `@lucentpad.span`. The exporter batches spans in the background and never blocks or
 crashes your agent.
 
-## 5. Trace Claude Code or Copilot (gateway mode, coming in M2)
+## 5. Trace Claude Code or Copilot (gateway mode)
 
-Point the assistant's API base URL at the gateway; your API key is forwarded to the provider, never
+Point the assistant's base URL at the gateway; your API key is forwarded to the provider, never
 stored:
 
 ```sh
-ANTHROPIC_BASE_URL=http://localhost:8000/gateway/anthropic claude
+export ANTHROPIC_BASE_URL=http://localhost:8000/gateway/anthropic
+claude
 ```
 
-Each session appears live with tokens and cost per turn.
+Each session appears on the **Gateway** page with tokens and cost per turn. Copilot CLI and Copilot
+Chat work too, when they use your own API key; see [the gateway guide](gateway.md) for their setup.
 
 ## 6. Contribute
 

@@ -17,8 +17,24 @@ import {
 } from "../features/traces/view";
 import { useNow } from "../lib/useNow";
 import { usePolling } from "../lib/usePolling";
-import { getHealth, getTrace, getTraceFacets, listTraces } from "./client";
-import type { Span, TraceDetail, TraceList, TraceSummary } from "./types";
+import { clientParams, type GatewayView } from "../features/gateway/view";
+import { isoMicros } from "../lib/time";
+import {
+  getGatewaySummary,
+  getHealth,
+  getTrace,
+  getTraceFacets,
+  listGatewayTurns,
+  listTraces,
+} from "./client";
+import type {
+  GatewayTurn,
+  GatewayTurnList,
+  Span,
+  TraceDetail,
+  TraceList,
+  TraceSummary,
+} from "./types";
 
 export const PAGE_SIZE = 50;
 
@@ -123,13 +139,9 @@ export function mergeLivePage(
 }
 
 /**
- * Live updates for the traces list: every LIST_POLL_MS, ask for traces that gained spans
- * since the previous response's `as_of`, update loaded rows in place and (sorted by Started,
- * newest first only) prepend new ones; other sorts don't re-sort rows as they change. Loaded pages, filters and scroll are kept. Returns the ids to
- * highlight.
+ * Ids that just arrived by live polling, each kept for FRESH_HIGHLIGHT_MS; `highlight` adds some.
  */
-export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<string> {
-  const client = useQueryClient();
+function useFreshIds(): [ReadonlySet<string>, (ids: string[]) => void] {
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
 
@@ -149,6 +161,19 @@ export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<s
     }, FRESH_HIGHLIGHT_MS);
     timers.current.add(timer);
   }, []);
+
+  return [fresh, highlight];
+}
+
+/**
+ * Live updates for the traces list: every LIST_POLL_MS, ask for traces that gained spans
+ * since the previous response's `as_of`, update loaded rows in place and (sorted by Started,
+ * newest first only) prepend new ones; other sorts don't re-sort rows as they change. Loaded pages, filters and scroll are kept. Returns the ids to
+ * highlight.
+ */
+export function useLiveTraces(view: TracesView, enabled: boolean): ReadonlySet<string> {
+  const client = useQueryClient();
+  const [fresh, highlight] = useFreshIds();
 
   usePolling(
     async (signal) => {
@@ -271,6 +296,126 @@ export function useLiveTrace(traceId: string): LiveTraceState {
   );
 
   return { live, polling, now };
+}
+
+// ------------------------------------------------------------------ gateway (M2)
+
+/** A page of gateway turns plus the window start it was fetched with (cursors are bound to it). */
+export interface GatewayPage extends GatewayTurnList {
+  from: string;
+}
+
+export function gatewayTurnsKey(view: GatewayView): QueryKey {
+  return ["gateway-turns", view.range, view.client];
+}
+
+export function gatewaySummaryKey(range: RangeId): QueryKey {
+  return ["gateway-summary", range];
+}
+
+/** Gateway turns in the view's window, newest first, paged by cursor. */
+export function useGatewayTurns(view: GatewayView) {
+  return useInfiniteQuery({
+    queryKey: gatewayTurnsKey(view),
+    queryFn: async ({ pageParam, signal }): Promise<GatewayPage> => {
+      const from = pageParam?.from ?? rangeFrom(view.range);
+      const list = await listGatewayTurns(
+        { limit: PAGE_SIZE, cursor: pageParam?.cursor, from, ...clientParams(view) },
+        signal,
+      );
+      return { ...list, from };
+    },
+    initialPageParam: null as PageParam | null,
+    getNextPageParam: (last): PageParam | null =>
+      last.next_cursor ? { cursor: last.next_cursor, from: last.from } : null,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Per-client totals for the range (every client, whatever the client filter). */
+export function useGatewaySummary(range: RangeId) {
+  return useQuery({
+    queryKey: gatewaySummaryKey(range),
+    queryFn: ({ signal }) => getGatewaySummary({ from: rangeFrom(range) }, signal),
+    placeholderData: keepPreviousData,
+  });
+}
+
+const byStartDesc = (a: GatewayTurn, b: GatewayTurn): number =>
+  isoMicros(b.start_time) - isoMicros(a.start_time) ||
+  (a.span_id < b.span_id ? 1 : a.span_id > b.span_id ? -1 : 0);
+
+/**
+ * Replace known turns in place (by span_id) and put unseen ones into the first page, which is
+ * kept newest first (a long streamed turn can be stored after a later, shorter one).
+ */
+export function mergeGatewayTurns(
+  data: InfiniteData<GatewayPage>,
+  update: GatewayTurnList,
+): { data: InfiniteData<GatewayPage>; added: string[] } {
+  const incoming = new Map(update.turns.map((t) => [t.span_id, t]));
+  const known = new Set<string>();
+  const pages = data.pages.map((page) => ({
+    ...page,
+    turns: page.turns.map((t) => {
+      known.add(t.span_id);
+      return incoming.get(t.span_id) ?? t;
+    }),
+  }));
+  const fresh = update.turns.filter((t) => !known.has(t.span_id));
+  const [first, ...rest] = pages;
+  if (!first) return { data, added: [] };
+  const turns = fresh.length ? [...fresh, ...first.turns].sort(byStartDesc) : first.turns;
+  return {
+    data: { ...data, pages: [{ ...first, turns, as_of: update.as_of }, ...rest] },
+    added: fresh.map((t) => t.span_id),
+  };
+}
+
+/**
+ * Live gateway feed: every LIST_POLL_MS ask for turns stored since the previous response's
+ * `as_of` (same window and client filter), merge them into the loaded pages and refresh the
+ * per-client totals when something new arrived. Hidden tab → paused, errors → back off
+ * (usePolling). Returns the span ids to highlight.
+ */
+export function useLiveGatewayTurns(view: GatewayView, enabled: boolean): ReadonlySet<string> {
+  const client = useQueryClient();
+  const [fresh, highlight] = useFreshIds();
+
+  usePolling(
+    async (signal) => {
+      const key = gatewayTurnsKey(view);
+      const data = client.getQueryData<InfiniteData<GatewayPage>>(key);
+      const first = data?.pages[0];
+      if (!first || client.isFetching({ queryKey: key }) > 0) return;
+      const update = await listGatewayTurns(
+        {
+          limit: LIVE_LIMIT,
+          since: first.as_of,
+          from: rangeFrom(view.range),
+          ...clientParams(view),
+        },
+        signal,
+      );
+      if (update.turns.length >= LIVE_LIMIT) {
+        // Too much changed to merge (the API caps `since` at `limit`); start over.
+        await client.invalidateQueries({ queryKey: key });
+        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range) });
+        return;
+      }
+      const current = client.getQueryData<InfiniteData<GatewayPage>>(key);
+      if (!current) return;
+      const merged = mergeGatewayTurns(current, update);
+      client.setQueryData(key, merged.data);
+      if (merged.added.length > 0) {
+        highlight(merged.added);
+        void client.invalidateQueries({ queryKey: gatewaySummaryKey(view.range) });
+      }
+    },
+    { intervalMs: LIST_POLL_MS, enabled },
+  );
+
+  return fresh;
 }
 
 export function useHealth() {

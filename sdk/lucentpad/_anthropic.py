@@ -57,11 +57,26 @@ def input_preview(messages: Any) -> str | None:
     return None
 
 
+def _record_usage(call: LLMCall, usage: Any) -> None:
+    """Anthropic reports uncached input apart from cache reads/writes; record the total as the
+    input tokens (OpenTelemetry's convention) and the cached parts separately."""
+    parts = [
+        getattr(usage, k, None)
+        for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    ]
+    ints = [p if isinstance(p, int) and not isinstance(p, bool) else None for p in parts]
+    if all(p is None for p in ints):
+        return
+    call.input_tokens = sum(p or 0 for p in ints)
+    call.cache_read_tokens = ints[1]
+    call.cache_creation_tokens = ints[2]
+
+
 def _record_message(call: LLMCall, msg: Any) -> None:
     call.response_model = getattr(msg, "model", None) or call.response_model
     usage = getattr(msg, "usage", None)
     if usage is not None:
-        call.input_tokens = getattr(usage, "input_tokens", None)
+        _record_usage(call, usage)
         call.output_tokens = getattr(usage, "output_tokens", None)
     stop = getattr(msg, "stop_reason", None)
     if stop:
@@ -81,7 +96,7 @@ def _observer(call: LLMCall) -> Any:
             call.response_model = getattr(message, "model", None) or call.response_model
             usage = getattr(message, "usage", None)
             if usage is not None:
-                call.input_tokens = getattr(usage, "input_tokens", None)
+                _record_usage(call, usage)
                 call.output_tokens = getattr(usage, "output_tokens", None)
         elif kind == "content_block_start" and call.capture:
             block = event.content_block
@@ -102,8 +117,7 @@ def _observer(call: LLMCall) -> Any:
             if usage is not None:
                 if getattr(usage, "output_tokens", None) is not None:
                     call.output_tokens = usage.output_tokens
-                if getattr(usage, "input_tokens", None) is not None:
-                    call.input_tokens = usage.input_tokens
+                _record_usage(call, usage)
         return True
 
     return observe
