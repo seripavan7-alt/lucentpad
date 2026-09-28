@@ -150,6 +150,7 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 ## Decisions log
 | Date | Decision |
 | --- | --- |
+| 2026-09-28 | Evals UI redesigned at the user's request ("when I click an eval I must know all cases belong to it"): two-pane view, runs list left (status stripe, case squares, selected run = accent card pointing at the panel), selected run panel right (accent border, header repeats suite/time/status/commit, case bar, tiles, expandable case cards: output, every check, baseline → now, trace link; failing cases open by default). `/evals` selects the newest run; `/evals/:runId` both routes to `EvalsPage`; narrow screens show list or run with "← All runs". Removed `EvalRunPage`, `RunsTable`, `CaseTable`. |
 | 2026-09-27 | **M3 "go"** with D20–D28 as recommended in `docs/handoff/M3.md`. No Anthropic key yet: the eval gate is built and tested in mock mode; the live GitHub eval check (D25 secret, D28 PR) is an action item for when a key exists. |
 | 2026-09-27 | Sample data is labelled (`spans.sample`/`traces.sample`, migration 0005 backfills existing DBs). `GET /v1/data` → `{sample_data, real_data}`; `hide_sample` param on traces, facets, gateway turns/summary. Dashboard: small "Sample" tag and a "Hide sample data" switch in the sidebar, both shown only when real data exists too (never in the static demo). |
 | 2026-09-25 | M2 "go" with D16–D19 as recommended. |

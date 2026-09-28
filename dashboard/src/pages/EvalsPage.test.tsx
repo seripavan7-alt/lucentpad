@@ -37,64 +37,80 @@ function mockEvals({
 const runsRequests = (mock: ReturnType<typeof mockFetch>) =>
   mock.urls().filter((u) => u.pathname === "/v1/evals/runs");
 
-const runRows = () => [...document.querySelectorAll<HTMLElement>("tr[data-run-id]")];
-const caseGroup = (name: string) =>
-  document.querySelector<HTMLElement>(`tbody[data-case="${name}"]`)!;
+const runItems = () => [...document.querySelectorAll<HTMLElement>("a[data-run-id]")];
+const runItem = (id: string) => document.querySelector<HTMLElement>(`a[data-run-id="${id}"]`)!;
+const caseCard = (name: string) => document.querySelector<HTMLElement>(`li[data-case="${name}"]`)!;
+const panel = () => screen.getByRole("region", { name: "Selected eval run" });
+const detailRequests = (mock: ReturnType<typeof mockFetch>) =>
+  mock.urls().filter((u) => u.pathname.startsWith("/v1/evals/runs/"));
 
-describe("Evals page: runs", () => {
-  it("lists runs newest first with status, counts, regressions, cost, commit and CI link", async () => {
+describe("Evals page: runs list", () => {
+  it("lists runs newest first with status, date, commit, pass count, regressions and cost", async () => {
     mockEvals();
     renderApp("/evals");
     expect(screen.getByRole("heading", { level: 1, name: "Evals" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(runRows()).toHaveLength(2);
+      expect(runItems()).toHaveLength(2);
     });
-    const [regressed, passed] = runRows();
+    const regressed = runItem(RUN_ID);
+    expect(regressed).toHaveAttribute("data-status", "regressed");
     expect(regressed).toHaveTextContent("Regressed");
-    expect(regressed).toHaveTextContent("support_agent");
     expect(regressed).toHaveTextContent("Sep 25, 09:55:00");
-    expect(regressed).toHaveTextContent("2 / 4");
-    expect(regressed).toHaveTextContent("$0.0125");
+    expect(regressed).toHaveTextContent("support_agent");
     expect(regressed).toHaveTextContent("prompt-tweak · 9f1c2d3");
-    expect(within(regressed!).getByRole("link", { name: "Open" })).toHaveAttribute(
-      "href",
-      evalRun.ci_url,
+    expect(regressed).toHaveTextContent("2/4 passed");
+    expect(regressed).toHaveTextContent("1 regression");
+    expect(regressed).toHaveTextContent("$0.0125 +25%");
+    expect(regressed).toHaveAttribute("href", `/evals/${RUN_ID}`);
+    // One square per case: the regression, the other failure, then the passes.
+    const dots = [...regressed.querySelectorAll("i[data-kind]")].map(
+      (d) => (d as HTMLElement).dataset.kind,
     );
-    expect(within(regressed!).getByRole("link", { name: "support_agent" })).toHaveAttribute(
-      "href",
-      `/evals/${RUN_ID}`,
-    );
+    expect(dots).toEqual(["regressed", "failed", "passed", "passed"]);
+
+    const passed = runItem("run-b");
     expect(passed).toHaveTextContent("Passed");
-    expect(passed).toHaveTextContent("6 / 6");
+    expect(passed).toHaveTextContent("6/6 passed");
     expect(passed).toHaveTextContent("main · 0123456");
+    expect(passed).toHaveTextContent("$0.0101 −10%");
+    expect(passed).not.toHaveTextContent("regression");
   });
 
-  it("shows each run's cost against its baseline", async () => {
-    const user = userEvent.setup();
-    mockEvals();
+  it("selects the newest run on /evals and marks it as the selected run", async () => {
+    const mock = mockEvals();
     renderApp("/evals");
     await waitFor(() => {
-      expect(runRows()).toHaveLength(2);
+      expect(runItems()).toHaveLength(2);
     });
-    expect(screen.getByRole("columnheader", { name: "Cost vs baseline" })).toBeInTheDocument();
-    const [regressed, passed] = runRows();
-    const cost = (row: HTMLElement) => within(row).getAllByRole("cell")[5]!;
-    expect(cost(regressed!)).toHaveTextContent("$0.0125+25%");
-    expect(cost(regressed!)).toHaveAttribute("title", "baseline $0.0100");
-    expect(cost(passed!)).toHaveTextContent("$0.0101−10%");
-    // No cost: no change to show.
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(runItem(RUN_ID)).toHaveAttribute("aria-current", "true");
+    expect(runItem("run-b")).not.toHaveAttribute("aria-current");
+    expect(await within(panel()).findByText("Selected run")).toBeInTheDocument();
+    expect(panel()).toHaveTextContent("1 of 2+ · newest");
+    expect(detailRequests(mock).at(-1)!.pathname).toBe(`/v1/evals/runs/${RUN_ID}`);
+  });
+
+  it("opens a run from the list: the URL, the highlight and the panel all follow", async () => {
+    const user = userEvent.setup();
+    const mock = mockEvals();
+    renderApp("/evals");
     await waitFor(() => {
-      expect(runRows()).toHaveLength(3);
+      expect(runItems()).toHaveLength(2);
     });
-    expect(cost(runRows()[2]!)).toHaveTextContent(/^–$/);
+    await user.click(runItem("run-b"));
+    expect(getLocation()).toBe("/evals/run-b");
+    expect(runItem("run-b")).toHaveAttribute("aria-current", "true");
+    expect(runItem(RUN_ID)).not.toHaveAttribute("aria-current");
+    await waitFor(() => {
+      expect(detailRequests(mock).at(-1)!.pathname).toBe("/v1/evals/runs/run-b");
+    });
+    expect(await within(panel()).findByText(/2 of 2\+/)).toBeInTheDocument();
   });
 
   it("asks without hide_sample by default, and with it when the sidebar switch says so", async () => {
     const shown = mockEvals();
     const { unmount } = renderApp("/evals");
     await waitFor(() => {
-      expect(runRows()).toHaveLength(2);
+      expect(runItems()).toHaveLength(2);
     });
     expect(runsRequests(shown).every((u) => !u.searchParams.has("hide_sample"))).toBe(true);
     unmount();
@@ -108,37 +124,21 @@ describe("Evals page: runs", () => {
   });
 
   it("loads more runs with the cursor", async () => {
-    const mock = mockEvals();
     const user = userEvent.setup();
+    const mock = mockEvals();
     renderApp("/evals");
     await waitFor(() => {
-      expect(runRows()).toHaveLength(2);
+      expect(runItems()).toHaveLength(2);
     });
     await user.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => {
-      expect(runRows()).toHaveLength(3);
+      expect(runItems()).toHaveLength(3);
     });
-    expect(runRows()[2]).toHaveTextContent("Error");
-    const last = mock
-      .urls()
-      .filter((u) => u.pathname === "/v1/evals/runs")
-      .at(-1)!;
+    expect(runItems()[2]).toHaveTextContent("Error");
+    expect(runItems()[2]).toHaveTextContent("–");
+    const last = runsRequests(mock).at(-1)!;
     expect(last.searchParams.get("cursor")).toBe("r1.x");
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
-  });
-
-  it("opens a run from its row", async () => {
-    mockEvals();
-    const user = userEvent.setup();
-    renderApp("/evals");
-    await waitFor(() => {
-      expect(runRows()).toHaveLength(2);
-    });
-    await user.click(runRows()[0]!.querySelector("td")!);
-    expect(getLocation()).toBe(`/evals/${RUN_ID}`);
-    expect(
-      await screen.findByRole("heading", { level: 1, name: /support_agent/ }),
-    ).toBeInTheDocument();
   });
 
   it("explains how to record the first run", async () => {
@@ -149,13 +149,11 @@ describe("Evals page: runs", () => {
   });
 
   it("explains a server without eval runs (501)", async () => {
-    mockEvals({ runs: () => new HttpError(501, { detail: "eval runs not implemented yet" }) });
+    mockEvals({ runs: () => new HttpError(501, { detail: "not implemented" }) });
     renderApp("/evals");
     expect(await screen.findByText("Eval runs aren't available yet")).toBeInTheDocument();
   });
-});
 
-describe("costDelta", () => {
   it("signs the change against the baseline, or null without one", () => {
     expect(costDelta(0.0125, 0.01)).toBe("+25%");
     expect(costDelta(0.009, 0.01)).toBe("−10%");
@@ -166,17 +164,22 @@ describe("costDelta", () => {
   });
 });
 
-describe("Evals page: run detail", () => {
-  it("shows the run's status, commit, CI link and totals against the baseline", async () => {
+describe("Evals page: the selected run", () => {
+  it("heads the panel with the run's suite, time, status, commit, model and CI link", async () => {
     mockEvals();
     renderApp(`/evals/${RUN_ID}`);
-    const heading = await screen.findByRole("heading", { level: 1, name: /support_agent/ });
-    expect(within(heading).getByRole("link", { name: "Evals" })).toHaveAttribute("href", "/evals");
-    expect(screen.getAllByText("Regressed").length).toBeGreaterThan(0);
-    expect(screen.getByText("prompt-tweak", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText("9f1c2d3")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "CI run" })).toHaveAttribute("href", evalRun.ci_url);
-    expect(screen.getByText("claude-haiku-4-5")).toBeInTheDocument();
+    await screen.findByRole("region", { name: "Selected eval run" });
+    const title = await within(panel()).findByRole("heading", { level: 2, name: /support_agent/ });
+    expect(title).toHaveTextContent("Sep 25, 09:55:00");
+    expect(within(panel()).getByText("Regressed")).toBeInTheDocument();
+    expect(panel()).toHaveTextContent("prompt-tweak · 9f1c2d3");
+    expect(within(panel()).getByText("claude-haiku-4-5")).toBeInTheDocument();
+    expect(within(panel()).getByText("18.4s")).toBeInTheDocument();
+    expect(within(panel()).getByRole("link", { name: /CI run/ })).toHaveAttribute(
+      "href",
+      evalRun.ci_url,
+    );
+    expect(screen.getByRole("link", { name: "← All runs" })).toHaveAttribute("href", "/evals");
 
     const tiles = screen.getByRole("region", { name: "Run summary" });
     expect(within(tiles).getByRole("group", { name: "Cases passed" })).toHaveTextContent("2 of 4");
@@ -189,43 +192,73 @@ describe("Evals page: run detail", () => {
     );
   });
 
-  it("lists cases regressions first and flags regressions, fixes and new cases", async () => {
+  it("lists this run's cases inside the panel, regressions first, with change tags", async () => {
     mockEvals();
     renderApp(`/evals/${RUN_ID}`);
-    await screen.findByRole("heading", { level: 1, name: /support_agent/ });
-    const order = [...document.querySelectorAll<HTMLElement>("tbody[data-case]")].map(
-      (g) => g.dataset.case,
+    await screen.findByRole("region", { name: "Selected eval run" });
+    const list = await within(panel()).findByRole("list", {
+      name: "Cases in the support_agent run of Sep 25, 09:55:00",
+    });
+    expect(within(panel()).getByRole("heading", { name: /Cases in this run/ })).toHaveTextContent(
+      "4",
+    );
+    const order = [...list.querySelectorAll<HTMLElement>("li[data-case]")].map(
+      (c) => c.dataset.case,
     );
     expect(order).toEqual(["refund_over_limit", "reschedule", "order_status", "small_talk"]);
 
-    const regressed = caseGroup("refund_over_limit");
+    const regressed = caseCard("refund_over_limit");
     expect(regressed).toHaveAttribute("data-change", "regressed");
-    expect(regressed).toHaveTextContent("Fail");
-    expect(within(regressed).getByText("Regression")).toBeInTheDocument();
-    expect(regressed).toHaveTextContent("1 / 2");
+    expect(regressed).toHaveTextContent("Regression");
+    expect(regressed).toHaveTextContent("1/2 checks");
     expect(regressed).toHaveTextContent("3.40s");
     expect(regressed).toHaveTextContent("$0.0040");
-    expect(regressed).toHaveTextContent("I've issued the refund.");
-    // Failed checks are spelled out with their detail; passing ones aren't.
-    const failed = within(regressed).getByRole("list", {
-      name: "Failed checks for refund_over_limit",
+    expect(within(caseCard("small_talk")).getByText("Fixed")).toBeInTheDocument();
+    expect(caseCard("reschedule")).toHaveTextContent("New case");
+  });
+
+  it("opens failing cases by default and expands a passing case on click", async () => {
+    const user = userEvent.setup();
+    mockEvals();
+    renderApp(`/evals/${RUN_ID}`);
+    await screen.findByRole("region", { name: "Selected eval run" });
+    await within(panel()).findByRole("heading", { level: 2, name: /support_agent/ });
+
+    const regressed = caseCard("refund_over_limit");
+    const toggle = within(regressed).getByRole("button", { name: /refund_over_limit/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(regressed).getByText("I've issued the refund.")).toBeVisible();
+    const checks = within(regressed).getByRole("region", {
+      name: "Checks for refund_over_limit",
     });
-    expect(failed).toHaveTextContent("contains: colleague");
-    expect(failed).toHaveTextContent("output doesn't mention a colleague");
-    expect(failed).not.toHaveTextContent("issue_refund");
-    expect(within(regressed).getByRole("link", { name: "Open" })).toHaveAttribute(
+    // Every check is listed, passing and failing, with the failure's detail.
+    expect(checks).toHaveTextContent("tool_called: issue_refund");
+    expect(checks).toHaveTextContent("contains: colleague");
+    expect(checks).toHaveTextContent("output doesn't mention a colleague");
+    expect(regressed).toHaveTextContent("Baseline passed → now fails");
+    expect(within(regressed).getByRole("link", { name: "Open trace →" })).toHaveAttribute(
       "href",
       `/traces/${BLOCKED_TRACE_ID}`,
     );
 
-    expect(within(caseGroup("small_talk")).getByText("Fixed")).toBeInTheDocument();
-    expect(caseGroup("reschedule")).toHaveTextContent("New case");
-    expect(caseGroup("order_status")).toHaveTextContent("Pass");
-    expect(within(caseGroup("order_status")).queryByRole("list")).not.toBeInTheDocument();
-    expect(within(caseGroup("order_status")).getByRole("link", { name: "Open" })).toHaveAttribute(
+    const ok = caseCard("order_status");
+    const okToggle = within(ok).getByRole("button", { name: /order_status/ });
+    expect(okToggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(ok).getByText("Your order 1042 was delivered on Sep 22.")).not.toBeVisible();
+    await user.click(okToggle);
+    expect(okToggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(ok).getByText("Your order 1042 was delivered on Sep 22.")).toBeVisible();
+    expect(within(ok).getByRole("link", { name: "Open trace →" })).toHaveAttribute(
       "href",
       `/traces/${SUPPORT_TRACE_ID}`,
     );
+    await user.click(okToggle);
+    expect(okToggle).toHaveAttribute("aria-expanded", "false");
+
+    // No output and no trace: said plainly, no link.
+    const fresh = caseCard("reschedule");
+    expect(within(fresh).getByText("No output recorded.")).toBeVisible();
+    expect(within(fresh).queryByRole("link", { name: "Open trace →" })).not.toBeInTheDocument();
   });
 
   it("says when a run doesn't exist", async () => {

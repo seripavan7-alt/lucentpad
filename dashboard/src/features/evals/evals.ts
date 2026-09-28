@@ -31,3 +31,12 @@ export function costDelta(cost: number | null, baseline: number | null): string 
 export const shortSha = (sha: string | null | undefined) => (sha ? sha.slice(0, 7) : null);
 
 export const runHref = (id: string) => `/evals/${encodeURIComponent(id)}`;
+
+/** Regressions first, then other failures, then passes; suite order within each group. */
+export function orderCases(cases: EvalCaseResult[]): EvalCaseResult[] {
+  const rank = (c: EvalCaseResult) => (caseChange(c) === "regressed" ? 0 : !c.passed ? 1 : 2);
+  return cases
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)
+    .map(({ c }) => c);
+}
