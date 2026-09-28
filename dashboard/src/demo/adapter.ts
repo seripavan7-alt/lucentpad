@@ -6,12 +6,23 @@
  * must be mirrored here.
  */
 import type {
+  CostGroup,
+  CostPoint,
+  CostSeries,
+  EvalRun,
+  EvalRunList,
+  EvalRunSummary,
   Facet,
   FacetValue,
   GatewayClientTotals,
   GatewaySummary,
   GatewayTurn,
   GatewayTurnList,
+  GuardrailEvent,
+  GuardrailEventList,
+  GuardrailRules,
+  GuardrailSummary,
+  PriceTable,
   Span,
   TraceDetail,
   TraceFacets,
@@ -22,10 +33,12 @@ import type {
 } from "../api/types";
 import {
   Attr,
+  COST_GROUPS,
   EventName,
   FACET_MAX_VALUES,
   FACETS,
   GATEWAY_PROVIDERS,
+  GUARDRAIL_EVENT_KINDS,
   SPAN_SOURCES,
   SPAN_STATUSES,
   TRACE_SORTS,
@@ -36,6 +49,10 @@ export interface DemoSnapshot {
   generated_at: string;
   traces: TraceSummary[];
   spans: Record<string, Span[]>;
+  /** Sample eval runs (M3), newest first like the API; absent in older snapshots. */
+  eval_runs?: EvalRun[];
+  /** The API's active rules when the snapshot was taken (M3). */
+  guardrail_rules?: GuardrailRules;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -68,6 +85,10 @@ export function shiftSnapshot(snapshot: DemoSnapshot, ms: number): DemoSnapshot 
     generated_at: shiftTime(snapshot.generated_at, ms),
     traces: snapshot.traces.map((t) => ({ ...t, start_time: shiftTime(t.start_time, ms) })),
     spans,
+    ...(snapshot.guardrail_rules && { guardrail_rules: snapshot.guardrail_rules }),
+    ...(snapshot.eval_runs && {
+      eval_runs: snapshot.eval_runs.map((r) => ({ ...r, started_at: shiftTime(r.started_at, ms) })),
+    }),
   };
 }
 
@@ -119,6 +140,16 @@ interface Filter {
   from: number | null;
   to: number | null;
   values: Record<Facet, readonly string[]>;
+}
+
+/** A boolean query param as FastAPI reads one; absent = false. */
+function parseBool(params: URLSearchParams, name: string): boolean {
+  const raw = params.get(name);
+  if (raw === null) return false;
+  const v = raw.toLowerCase();
+  if (["true", "1", "yes", "on", "t", "y"].includes(v)) return true;
+  if (["false", "0", "no", "off", "f", "n"].includes(v)) return false;
+  throw new InvalidParam(name, "Input should be a valid boolean");
 }
 
 function parseFilter(params: URLSearchParams): Filter {
@@ -281,6 +312,213 @@ function gatewayRows(snapshot: DemoSnapshot): GatewayRow[] {
 
 /** Cost sums in the API's `numeric(18, 8)` units, so totals match its decimal sums exactly. */
 const COST_UNITS = 1e8;
+
+// --------------------------------------------------------------------------- M3
+
+/** The server's price table (`pricing.py`, USD per million tokens), sorted by model. */
+export const DEMO_PRICES: PriceTable = {
+  checked: "2026-09-25",
+  prices: [
+    { model: "claude-haiku-4-5", input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25 },
+    { model: "claude-opus-5-5", input: 4.0, output: 20.0, cache_read: 0.2, cache_write: 5.0 },
+    { model: "claude-sonnet-5", input: 2.0, output: 10.0, cache_read: 0.2, cache_write: 2.5 },
+    { model: "gpt-5", input: 1.25, output: 10.0, cache_read: 0.125, cache_write: 1.25 },
+    { model: "gpt-5-mini", input: 0.25, output: 2.0, cache_read: 0.025, cache_write: 0.25 },
+  ],
+};
+
+/** Rules for a snapshot without `guardrail_rules` (the server's built-in refund limit). */
+export const DEMO_RULES: GuardrailRules = {
+  source: "built-in",
+  version: "built-in",
+  rules: [
+    {
+      id: "refund_limit",
+      type: "tool",
+      description: "Demo support agent: refunds above the automatic limit need a person.",
+      keywords: [],
+      pattern: null,
+      tool: "issue_refund",
+      condition: "amount > 200",
+      message: "Refunds over $200 need a human to approve them.",
+    },
+  ],
+};
+
+/** ISO time to the second, like the API's for whole-second values ("…T10:00:00Z"). */
+const isoSeconds = (ms: number) => new Date(ms).toISOString().replace(/\.000Z$/, "Z");
+
+interface EventRow {
+  event: GuardrailEvent;
+  time: number; // epoch µs
+  stored: number; // epoch µs: when the span holding it ended (was exported)
+  /** 0 for a block; a redaction's or budget alert's 1-based position in its span's events. */
+  seq: number;
+}
+
+/** A redaction count as the API stores it: a number, rounded and clamped; otherwise 1. */
+function redactionCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.min(Math.max(Math.round(value), 0), 2 ** 31 - 1);
+}
+
+/** The budget fields every non-budget event carries (null), like the API. */
+const NO_BUDGET = { budget_limit_usd: null, budget_spent_usd: null, budget_scope: null } as const;
+
+/**
+ * Every block (a `kind=guardrail` span), redaction (a `lucentpad.redaction` event) and budget
+ * alert (a `lucentpad.budget.alert` event) in the snapshot, like the `guardrail_events` rows the
+ * server writes at ingest, newest first by (time, trace_id, span_id, seq).
+ */
+function guardrailRows(snapshot: DemoSnapshot): EventRow[] {
+  const rows: EventRow[] = [];
+  for (const list of Object.values(snapshot.spans)) {
+    for (const span of list) {
+      const attrs = span.attributes ?? {};
+      const client = str(attrs, Attr.CLIENT);
+      const stored = isoMicros(span.end_time);
+      if (span.kind === "guardrail") {
+        rows.push({
+          time: isoMicros(span.start_time),
+          stored,
+          seq: 0,
+          event: {
+            kind: "block",
+            time: span.start_time,
+            trace_id: span.trace_id,
+            span_id: span.span_id,
+            source: span.source,
+            client,
+            rule: str(attrs, Attr.GUARDRAIL_RULE),
+            reason: str(attrs, Attr.GUARDRAIL_REASON) ?? span.status_message ?? null,
+            redaction_kind: null,
+            count: 1,
+            ...NO_BUDGET,
+          },
+        });
+      }
+      for (const [i, e] of (span.events ?? []).entries()) {
+        const ea = e.attributes ?? {};
+        if (e.name === EventName.BUDGET_ALERT) {
+          rows.push({
+            time: isoMicros(e.time),
+            stored,
+            seq: i + 1,
+            event: {
+              kind: "budget",
+              time: e.time,
+              trace_id: span.trace_id,
+              span_id: span.span_id,
+              source: span.source,
+              client,
+              rule: null,
+              reason: null,
+              redaction_kind: null,
+              count: 1,
+              budget_limit_usd: finite(ea, Attr.BUDGET_LIMIT_USD),
+              budget_spent_usd: finite(ea, Attr.BUDGET_SPENT_USD),
+              budget_scope: str(ea, Attr.BUDGET_SCOPE)?.slice(0, 20) ?? null,
+            },
+          });
+          continue;
+        }
+        if (e.name !== EventName.REDACTION) continue;
+        rows.push({
+          time: isoMicros(e.time),
+          stored,
+          seq: i + 1,
+          event: {
+            kind: "redaction",
+            time: e.time,
+            trace_id: span.trace_id,
+            span_id: span.span_id,
+            source: span.source,
+            client,
+            rule: null,
+            reason: null,
+            redaction_kind: (str(ea, Attr.REDACTION_KIND) ?? "unknown").slice(0, 100),
+            count: redactionCount(ea[Attr.REDACTION_COUNT]),
+            ...NO_BUDGET,
+          },
+        });
+      }
+    }
+  }
+  const desc = (a: string, b: string) => compareCodePoints(b, a);
+  return rows.sort(
+    (a, b) =>
+      b.time - a.time ||
+      desc(a.event.trace_id, b.event.trace_id) ||
+      desc(a.event.span_id, b.event.span_id) ||
+      b.seq - a.seq,
+  );
+}
+
+interface CostRow {
+  start: number; // epoch ms
+  model: string;
+  client: string;
+  service: string;
+  cost: number; // COST_UNITS
+  input: number;
+  output: number;
+}
+
+const pick = (r: CostRow, group: CostGroup): string =>
+  group === "model" ? r.model : group === "client" ? r.client : r.service;
+
+/** Every span with a cost, as the cost series sees it (`spans.cost_usd IS NOT NULL`). */
+function costRows(snapshot: DemoSnapshot): CostRow[] {
+  const rows: CostRow[] = [];
+  for (const list of Object.values(snapshot.spans)) {
+    for (const span of list) {
+      const attrs = span.attributes ?? {};
+      const cost = finite(attrs, Attr.COST_USD);
+      if (cost === null) continue;
+      const model =
+        [Attr.GEN_AI_RESPONSE_MODEL, Attr.GEN_AI_REQUEST_MODEL]
+          .map((k) => str(attrs, k))
+          .find((v) => v !== null && v !== "") ?? "other";
+      rows.push({
+        start: Date.parse(span.start_time),
+        model,
+        client: str(attrs, Attr.CLIENT) ?? "other",
+        service: str(attrs, Attr.SERVICE_NAME) ?? "other",
+        cost: Math.round(cost * COST_UNITS),
+        input: int(attrs, Attr.GEN_AI_INPUT_TOKENS) ?? 0,
+        output: int(attrs, Attr.GEN_AI_OUTPUT_TOKENS) ?? 0,
+      });
+    }
+  }
+  return rows;
+}
+
+/** The server's bucket size for a window (`bucket_seconds_for`): 5 min up to 2 h, 1 h up to
+ * 2 days, else 1 day. */
+export function bucketSeconds(windowMs: number): number {
+  if (windowMs <= 2 * 3600_000) return 300;
+  if (windowMs <= 2 * 86_400_000) return 3600;
+  return 86400;
+}
+
+/** An eval run as its list row. */
+export function toEvalSummary(run: EvalRun): EvalRunSummary {
+  const passed = run.cases.filter((c) => c.passed).length;
+  return {
+    id: run.id,
+    suite: run.suite,
+    status: run.status,
+    started_at: run.started_at,
+    passed,
+    failed: run.cases.length - passed,
+    regressions: run.cases.filter((c) => c.baseline_passed === true && !c.passed).length,
+    cost_usd: run.cost_usd,
+    baseline_cost_usd: run.baseline_cost_usd,
+    git_sha: run.git_sha ?? null,
+    git_ref: run.git_ref ?? null,
+    ci_url: run.ci_url ?? null,
+  };
+}
 
 const compareValues = (a: FacetValue, b: FacetValue): number =>
   b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
@@ -489,6 +727,203 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
     return json(body);
   }
 
+  // ------------------------------------------------------------------ M3
+
+  const guardrails = guardrailRows(snapshot);
+
+  const parseLimit = (params: URLSearchParams): number => {
+    const rawLimit = params.get("limit");
+    const limit = rawLimit === null ? DEFAULT_LIMIT : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+      throw new InvalidParam("limit", `limit must be an integer from 1 to ${MAX_LIMIT}`);
+    }
+    return limit;
+  };
+
+  const eventInWindow = (row: EventRow, from: number | null, to: number | null) =>
+    (from === null || row.time >= from * 1000) && (to === null || row.time < to * 1000);
+
+  function guardrailEvents(params: URLSearchParams): Response {
+    const limit = parseLimit(params);
+    const from = parseTime(params, "from");
+    const to = parseTime(params, "to");
+    const since = parseTime(params, "since");
+    const kinds = [...new Set(params.getAll("kind"))].sort();
+    if (!kinds.every((k) => (GUARDRAIL_EVENT_KINDS as readonly string[]).includes(k))) {
+      return invalid("kind", `kind must be one of ${GUARDRAIL_EVENT_KINDS.join(", ")}`);
+    }
+    const rawCursor = params.get("cursor");
+    if (since !== null && rawCursor !== null) {
+      return invalid("cursor", "cursor cannot be combined with since");
+    }
+    // Every kind is the same query as none (and the same cursor), like the API.
+    const wanted = kinds.length < GUARDRAIL_EVENT_KINDS.length ? kinds : [];
+    const fp = fingerprintOf([from, to, wanted]);
+    let after = -1;
+    if (rawCursor !== null) {
+      const match = /^e([0-9]+)\.([0-9a-z]+)$/.exec(rawCursor);
+      if (match?.[2] !== fp) return invalid("cursor", "invalid cursor");
+      after = Number(match[1]);
+    }
+    const page: GuardrailEvent[] = [];
+    let lastIndex = -1;
+    let hasNext = false;
+    for (let i = after + 1; i < guardrails.length; i++) {
+      const row = guardrails[i];
+      if (!row) break;
+      if (!eventInWindow(row, from, to)) continue;
+      if (wanted.length && !wanted.includes(row.event.kind)) continue;
+      // Live polling: the snapshot never changes, so "stored after `since`" means its span
+      // ended after it.
+      if (since !== null && row.stored <= since * 1000) continue;
+      if (page.length === limit) {
+        hasNext = true;
+        break;
+      }
+      page.push(row.event);
+      lastIndex = i;
+    }
+    const body: GuardrailEventList = {
+      events: page,
+      next_cursor: hasNext && since === null ? `e${lastIndex}.${fp}` : null,
+      as_of: new Date().toISOString(),
+    };
+    return json(body);
+  }
+
+  function guardrailSummary(params: URLSearchParams): Response {
+    const from = parseTime(params, "from");
+    const to = parseTime(params, "to");
+    const blocks = new Map<string, number>();
+    const redactions = new Map<string, number>();
+    let budgetAlerts = 0;
+    for (const row of guardrails) {
+      if (!eventInWindow(row, from, to)) continue;
+      const e = row.event;
+      if (e.kind === "block") {
+        const rule = e.rule ?? "unknown";
+        blocks.set(rule, (blocks.get(rule) ?? 0) + 1);
+      } else if (e.kind === "budget") {
+        budgetAlerts += 1;
+      } else {
+        const kind = e.redaction_kind ?? "unknown";
+        redactions.set(kind, (redactions.get(kind) ?? 0) + e.count);
+      }
+    }
+    const body: GuardrailSummary = {
+      blocks: [...blocks]
+        .map(([rule, n]) => ({ rule, blocks: n }))
+        .sort((a, b) => b.blocks - a.blocks || compareCodePoints(a.rule, b.rule)),
+      redactions: [...redactions].map(([value, count]) => ({ value, count })).sort(compareValues),
+      budget_alerts: budgetAlerts,
+      as_of: new Date().toISOString(),
+    };
+    return json(body);
+  }
+
+  const priced = costRows(snapshot);
+
+  function costs(params: URLSearchParams): Response {
+    const from = parseTime(params, "from");
+    const to = parseTime(params, "to");
+    const rawGroup = params.get("group_by") ?? "model";
+    const group = COST_GROUPS.find((g) => g === rawGroup);
+    if (group === undefined)
+      return invalid("group_by", "group_by must be model, client or service");
+    // Internal (live demo only): where "now" is in snapshot time, and the shift to align
+    // buckets to, so shifted buckets still start on round times.
+    const now = Number(params.get("demo_now") ?? Date.parse(snapshot.generated_at));
+    const shift = Number(params.get("demo_shift") ?? 0);
+    const inRange = priced.filter(
+      (r) => (from === null || r.start >= from) && (to === null || r.start < to),
+    );
+    // An open start is the oldest priced span in range; an open end is "now".
+    const oldest = inRange.reduce((m, r) => Math.min(m, r.start), Infinity);
+    const start = from ?? (Number.isFinite(oldest) ? oldest : null);
+    const end = to ?? now;
+    const bucket = bucketSeconds(start === null ? 0 : end - start);
+    const bucketMs = bucket * 1000;
+    const acc = new Map<string, CostPoint & { units: number }>();
+    for (const r of inRange) {
+      const b = Math.floor((r.start + shift) / bucketMs) * bucketMs - shift;
+      const key = pick(r, group);
+      const id = `${b}|${key}`;
+      let p = acc.get(id);
+      if (!p) {
+        p = {
+          bucket: isoSeconds(b),
+          group: key,
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          calls: 0,
+          units: 0,
+        };
+        acc.set(id, p);
+      }
+      p.units += r.cost;
+      p.input_tokens += r.input;
+      p.output_tokens += r.output;
+      p.calls += 1;
+    }
+    const points: CostPoint[] = [...acc.values()]
+      .sort(
+        (a, b) =>
+          Date.parse(a.bucket) - Date.parse(b.bucket) || compareCodePoints(a.group, b.group),
+      )
+      .map(({ units, ...p }) => ({ ...p, cost_usd: units / COST_UNITS }));
+    const total = [...acc.values()].reduce((n, p) => n + p.units, 0);
+    const body: CostSeries = {
+      points,
+      bucket_seconds: bucket,
+      group_by: group,
+      total_cost_usd: total / COST_UNITS,
+      as_of: new Date().toISOString(),
+    };
+    return json(body);
+  }
+
+  const runs = [...(snapshot.eval_runs ?? [])].sort(
+    (a, b) => isoMicros(b.started_at) - isoMicros(a.started_at) || compareCodePoints(b.id, a.id),
+  );
+  const runsById = new Map(runs.map((r) => [r.id, r]));
+
+  function evalRuns(params: URLSearchParams): Response {
+    const limit = parseLimit(params);
+    const suite = params.get("suite");
+    // Every demo run is sample data, so hiding sample data leaves none.
+    const hideSample = parseBool(params, "hide_sample");
+    const rawCursor = params.get("cursor");
+    const fp = fingerprintOf([suite ?? "", hideSample]);
+    let after = -1;
+    if (rawCursor !== null) {
+      const match = /^r([0-9]+)\.([0-9a-z]+)$/.exec(rawCursor);
+      if (match?.[2] !== fp) return invalid("cursor", "invalid cursor");
+      after = Number(match[1]);
+    }
+    const page: EvalRunSummary[] = [];
+    let lastIndex = -1;
+    let hasNext = false;
+    for (let i = after + 1; i < runs.length; i++) {
+      const run = runs[i];
+      if (!run) break;
+      if (hideSample || (suite !== null && run.suite !== suite)) continue;
+      if (page.length === limit) {
+        hasNext = true;
+        break;
+      }
+      page.push(toEvalSummary(run));
+      lastIndex = i;
+    }
+    const body: EvalRunList = { runs: page, next_cursor: hasNext ? `r${lastIndex}.${fp}` : null };
+    return json(body);
+  }
+
+  function evalRun(runId: string): Response {
+    const run = runsById.get(runId);
+    return run ? json(run) : json({ detail: "eval run not found" }, 404);
+  }
+
   return async function demoFetch(url: string): Promise<Response> {
     await Promise.resolve();
     const { pathname, searchParams } = new URL(url, "http://demo.invalid");
@@ -500,6 +935,14 @@ export function createDemoFetch(snapshot: DemoSnapshot) {
       if (pathname === "/v1/traces/facets") return facets(searchParams);
       if (pathname === "/v1/gateway/turns") return gatewayTurns(searchParams);
       if (pathname === "/v1/gateway/summary") return gatewaySummary(searchParams);
+      if (pathname === "/v1/pricing") return json(DEMO_PRICES);
+      if (pathname === "/v1/costs") return costs(searchParams);
+      if (pathname === "/v1/guardrails/rules") return json(snapshot.guardrail_rules ?? DEMO_RULES);
+      if (pathname === "/v1/guardrails/events") return guardrailEvents(searchParams);
+      if (pathname === "/v1/guardrails/summary") return guardrailSummary(searchParams);
+      if (pathname === "/v1/evals/runs") return evalRuns(searchParams);
+      const runId = /^\/v1\/evals\/runs\/([^/]+)$/.exec(pathname)?.[1];
+      if (runId !== undefined) return evalRun(decodeURIComponent(runId));
       const traceId = /^\/v1\/traces\/([^/]+)$/.exec(pathname)?.[1];
       if (traceId !== undefined) return detail(decodeURIComponent(traceId), searchParams);
     } catch (err) {
@@ -556,6 +999,11 @@ export function createLiveDemoFetch(snapshot: DemoSnapshot, now: () => number = 
         params.set(name, new Date(t - shift).toISOString());
       }
     }
+    if (parsed.pathname === "/v1/costs") {
+      // Buckets aligned in the viewer's time, and "now" for the bucket size.
+      params.set("demo_shift", String(shift));
+      params.set("demo_now", String(now() - shift));
+    }
     const res = await inner(`${parsed.pathname}${parsed.search}`);
     if (!res.ok) return res;
 
@@ -580,6 +1028,42 @@ export function createLiveDemoFetch(snapshot: DemoSnapshot, now: () => number = 
     if (Array.isArray(body.clients)) {
       return json({ ...(body as unknown as GatewaySummary), as_of: asOf } satisfies GatewaySummary);
     }
+    if (Array.isArray(body.events)) {
+      const list = body as unknown as GuardrailEventList;
+      return json({
+        events: list.events.map((e) => ({ ...e, time: shiftTimeMicros(e.time, shift) })),
+        next_cursor: list.next_cursor === null ? null : `${list.next_cursor}~${shift}`,
+        as_of: asOf,
+      } satisfies GuardrailEventList);
+    }
+    if (Array.isArray(body.points)) {
+      const series = body as unknown as CostSeries;
+      return json({
+        ...series,
+        points: series.points.map((p) => ({
+          ...p,
+          bucket: isoSeconds(Date.parse(p.bucket) + shift),
+        })),
+        as_of: asOf,
+      } satisfies CostSeries);
+    }
+    if (Array.isArray(body.blocks) && Array.isArray(body.redactions)) {
+      return json({
+        ...(body as unknown as GuardrailSummary),
+        as_of: asOf,
+      } satisfies GuardrailSummary);
+    }
+    if (Array.isArray(body.runs)) {
+      const list = body as unknown as EvalRunList;
+      return json({
+        runs: list.runs.map((r) => ({ ...r, started_at: shiftTimeMicros(r.started_at, shift) })),
+        next_cursor: list.next_cursor === null ? null : `${list.next_cursor}~${shift}`,
+      } satisfies EvalRunList);
+    }
+    if (Array.isArray(body.cases) && typeof body.started_at === "string") {
+      const run = body as unknown as EvalRun;
+      return json({ ...run, started_at: shiftTimeMicros(run.started_at, shift) } satisfies EvalRun);
+    }
     if (body.trace !== undefined && Array.isArray(body.spans)) {
       const detail = body as unknown as TraceDetail;
       return json({
@@ -588,6 +1072,6 @@ export function createLiveDemoFetch(snapshot: DemoSnapshot, now: () => number = 
         as_of: asOf,
       } satisfies TraceDetail);
     }
-    return json(body); // facets and health carry no times
+    return json(body); // facets, health, pricing and rules carry no times
   };
 }

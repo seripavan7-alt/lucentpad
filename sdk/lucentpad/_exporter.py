@@ -75,6 +75,11 @@ class Exporter:
         if start:
             self._thread.start()
 
+    @property
+    def client(self) -> httpx.Client:
+        """The HTTP client (and transport) the SDK also uses to fetch rules and prices."""
+        return self._client
+
     # ------------------------------------------------------------------ host side (never blocks)
 
     def submit(self, span: SpanDict) -> None:

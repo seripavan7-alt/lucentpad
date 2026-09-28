@@ -26,6 +26,9 @@ class Session:
     session_id: str
     client: str
     last_seen: float
+    spent_usd: float = 0.0
+    """Estimated spend of the session's turns so far (budget alerts, D23)."""
+    budget_alerted: bool = False
 
 
 def new_hex_id(n_bytes: int) -> str:

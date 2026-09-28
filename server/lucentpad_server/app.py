@@ -16,19 +16,34 @@ from lucentpad_server import db, sample
 from lucentpad_server.gateway import GatewayProxy
 from lucentpad_server.gateway.config import GatewayConfig
 from lucentpad_server.gateway.proxy import HttpGatewayProxy
+from lucentpad_server.guardrails import GuardrailProvider
+from lucentpad_server.guardrails.redaction import redact_spans
+from lucentpad_server.guardrails.rules import FileGuardrails
 from lucentpad_server.ingest import IngestPipeline
 from lucentpad_server.ingest.body_limit import BodyLimitMiddleware, max_body_from_env
 from lucentpad_server.ingest.queue import InProcessSpanQueue, queue_max_from_env
 from lucentpad_server.ingest.writer import QueuedIngest, drain_timeout_from_env
+from lucentpad_server.pricing import PRICES, PRICES_CHECKED
 from lucentpad_server.query import TraceFilter
 from lucentpad_server.schema import (
+    CostGroup,
+    CostSeries,
     DataInfo,
     ErrorResponse,
+    EvalRun,
+    EvalRunIn,
+    EvalRunList,
     GatewayProvider,
     GatewaySummary,
     GatewayTurnList,
+    GuardrailEventKind,
+    GuardrailEventList,
+    GuardrailRules,
+    GuardrailSummary,
     IngestAccepted,
     IngestStats,
+    ModelPrice,
+    PriceTable,
     SpanBatch,
     SpanSource,
     SpanStatus,
@@ -96,6 +111,8 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
     ``$LUCENTPAD_SEED_SAMPLE=1``, both read at startup. Ingest settings (read at startup):
     ``$LUCENTPAD_INGEST_QUEUE_MAX`` (spans, default 50 000), ``$LUCENTPAD_INGEST_DRAIN_TIMEOUT``
     (seconds, default 5) and ``$LUCENTPAD_INGEST_MAX_BODY_BYTES`` (default 10 MiB, read here).
+    Guardrails: ``$LUCENTPAD_RULES_FILE`` (YAML rules; default: the built-in demo rules). Ingest
+    redacts every stored span (D20).
     """
 
     @asynccontextmanager
@@ -114,8 +131,18 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
             shift = await store.shift_sample_to_now()
             if shift is not None:
                 log.info("sample-only database: shifted sample timestamps by %s", shift)
+            # Sample eval runs: after the shift, so they line up with the (now current) sample;
+            # also fills them in for sample databases seeded before M3.
+            if seed and not await store.has_eval_runs() and await store.is_sample_only():
+                runs = sample.eval_runs(datetime.now(UTC))
+                await store.insert_eval_runs(runs, sample=True)
+                log.info("loaded %d sample eval runs", len(runs))
             app.state.store = store
-            ingest = QueuedIngest(store, InProcessSpanQueue(queue_max_from_env()))
+            # Blocking rules: $LUCENTPAD_RULES_FILE (reloaded on change), else built-in demo rules.
+            app.state.guardrails = FileGuardrails.from_env()
+            ingest = QueuedIngest(
+                store, InProcessSpanQueue(queue_max_from_env()), transform=redact_spans
+            )
             ingest.start()
             app.state.ingest = ingest
             # Gateway settings: see lucentpad_server/gateway/config.py (LUCENTPAD_* env vars).
@@ -389,5 +416,169 @@ def create_app(database_url: str | None = None, *, seed_sample: bool | None = No
             )
         except NotImplementedError as exc:
             raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from None
+
+    # ------------------------------------------------------------------ M3
+
+    def _not_implemented(exc: NotImplementedError) -> HTTPException:
+        return HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc) or "not implemented")
+
+    def _check_tz(**values: datetime | None) -> None:
+        for label, value in values.items():
+            if value is not None and value.tzinfo is None:
+                raise _invalid(label.rstrip("_"), "timestamp must include a timezone")
+
+    @app.get(
+        "/v1/guardrails/rules",
+        tags=["guardrails"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def guardrail_rules(request: Request) -> GuardrailRules:
+        """The active blocking rules. The SDK and gateway fetch these and refresh them."""
+        rules: GuardrailProvider | None = getattr(request.app.state, "guardrails", None)
+        if rules is None:
+            raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "guardrails not loaded")
+        return rules.rules()
+
+    @app.get(
+        "/v1/guardrails/events",
+        tags=["guardrails"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def guardrail_events(
+        request: Request,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+        kind: Annotated[list[GuardrailEventKind] | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+        since: datetime | None = None,
+        hide_sample: bool = False,
+    ) -> GuardrailEventList:
+        """Blocks, redactions and budget alerts, newest first."""
+        _check_tz(from_=start, to=end, since=since)
+        if since is not None and cursor is not None:
+            raise _invalid("cursor", "cursor cannot be combined with since")
+        try:
+            return await get_store(request).guardrail_events(
+                start=start,
+                end=end,
+                kinds=tuple(kind or ()),
+                limit=limit,
+                cursor=cursor,
+                since=since,
+                hide_sample=hide_sample,
+            )
+        except InvalidCursorError:
+            raise _invalid("cursor", "invalid cursor") from None
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+
+    @app.get(
+        "/v1/guardrails/summary",
+        tags=["guardrails"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def guardrail_summary(
+        request: Request,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+        hide_sample: bool = False,
+    ) -> GuardrailSummary:
+        """Blocks per rule and redactions per kind in the window."""
+        _check_tz(from_=start, to=end)
+        try:
+            return await get_store(request).guardrail_summary(
+                start=start, end=end, hide_sample=hide_sample
+            )
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+
+    @app.get("/v1/pricing", tags=["meta"])
+    async def price_table() -> PriceTable:
+        """The price table that prices every stored span (USD per million tokens). The SDK and
+        gateway use it to estimate spend for budgets."""
+        return PriceTable(
+            prices=[
+                ModelPrice(
+                    model=name,
+                    input=p.input_per_mtok,
+                    output=p.output_per_mtok,
+                    cache_read=p.cache_read_per_mtok,
+                    cache_write=p.cache_write_per_mtok,
+                )
+                for name, p in sorted(PRICES.items())
+            ],
+            checked=PRICES_CHECKED,
+        )
+
+    @app.get(
+        "/v1/costs",
+        tags=["query"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def costs(
+        request: Request,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+        group_by: CostGroup = "model",
+        hide_sample: bool = False,
+    ) -> CostSeries:
+        """Spend over time, grouped by model, client or service."""
+        _check_tz(from_=start, to=end)
+        try:
+            return await get_store(request).cost_series(
+                start=start, end=end, group_by=group_by, hide_sample=hide_sample
+            )
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+
+    @app.post(
+        "/v1/evals/runs",
+        status_code=status.HTTP_201_CREATED,
+        tags=["evals"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def create_eval_run(run: EvalRunIn, request: Request) -> EvalRun:
+        """Record an eval run (posted by `lucentpad eval`)."""
+        try:
+            return await get_store(request).create_eval_run(run)
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+
+    @app.get(
+        "/v1/evals/runs",
+        tags=["evals"],
+        responses={501: {"model": ErrorResponse, "description": "Not implemented yet."}},
+    )
+    async def list_eval_runs(
+        request: Request,
+        suite: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+        hide_sample: bool = False,
+    ) -> EvalRunList:
+        """Eval runs, newest first."""
+        try:
+            return await get_store(request).list_eval_runs(
+                suite=suite, limit=limit, cursor=cursor, hide_sample=hide_sample
+            )
+        except InvalidCursorError:
+            raise _invalid("cursor", "invalid cursor") from None
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+
+    @app.get(
+        "/v1/evals/runs/{run_id}",
+        tags=["evals"],
+        responses={404: {"model": ErrorResponse}, 501: {"model": ErrorResponse}},
+    )
+    async def get_eval_run(run_id: str, request: Request) -> EvalRun:
+        try:
+            run = await get_store(request).get_eval_run(run_id)
+        except NotImplementedError as exc:
+            raise _not_implemented(exc) from None
+        if run is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "eval run not found")
+        return run
 
     return app

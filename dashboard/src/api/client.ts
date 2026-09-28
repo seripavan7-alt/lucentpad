@@ -1,11 +1,22 @@
 import type {
+  CostSeries,
+  CostsParams,
   DataInfo,
+  EvalRun,
+  EvalRunList,
+  EvalRunsParams,
   GatewaySummary,
   GatewaySummaryParams,
   GatewayTurnList,
   GatewayTurnsParams,
   GetTraceParams,
+  GuardrailEventList,
+  GuardrailEventsParams,
+  GuardrailRules,
+  GuardrailSummary,
+  GuardrailSummaryParams,
   ListTracesParams,
+  PriceTable,
   TraceDetail,
   TraceFacets,
   TraceFacetsParams,
@@ -108,6 +119,43 @@ export function getGatewaySummary(
   signal?: AbortSignal,
 ): Promise<GatewaySummary> {
   return getJson<GatewaySummary>(buildUrl("/v1/gateway/summary", params), signal);
+}
+
+export function getCosts(params: CostsParams = {}, signal?: AbortSignal): Promise<CostSeries> {
+  return getJson<CostSeries>(buildUrl("/v1/costs", params), signal);
+}
+
+export function getPricing(signal?: AbortSignal): Promise<PriceTable> {
+  return getJson<PriceTable>("/v1/pricing", signal);
+}
+
+export function getGuardrailRules(signal?: AbortSignal): Promise<GuardrailRules> {
+  return getJson<GuardrailRules>("/v1/guardrails/rules", signal);
+}
+
+export function listGuardrailEvents(
+  params: GuardrailEventsParams = {},
+  signal?: AbortSignal,
+): Promise<GuardrailEventList> {
+  return getJson<GuardrailEventList>(buildUrl("/v1/guardrails/events", params), signal);
+}
+
+export function getGuardrailSummary(
+  params: GuardrailSummaryParams = {},
+  signal?: AbortSignal,
+): Promise<GuardrailSummary> {
+  return getJson<GuardrailSummary>(buildUrl("/v1/guardrails/summary", params), signal);
+}
+
+export function listEvalRuns(
+  params: EvalRunsParams = {},
+  signal?: AbortSignal,
+): Promise<EvalRunList> {
+  return getJson<EvalRunList>(buildUrl("/v1/evals/runs", params), signal);
+}
+
+export function getEvalRun(runId: string, signal?: AbortSignal): Promise<EvalRun> {
+  return getJson<EvalRun>(`/v1/evals/runs/${encodeURIComponent(runId)}`, signal);
 }
 
 export function getDataInfo(signal?: AbortSignal): Promise<DataInfo> {

@@ -2,8 +2,16 @@
 
 The real ``anthropic.Anthropic`` client (wrapped by LucentPad) talks to this transport instead of
 the API, so runs are free, offline and repeatable, and the llm spans are the real thing. The
-script follows the demo (PRD "Demo agent and script", step 2): look the order up, then refund it
-and draft an email, then answer.
+script follows the demo (PRD "Demo agent and script"), from the conversation so far:
+
+- one order number: look it up, then refund it (delivered + "refund") and draft an email,
+  reschedule it ("reschedule", "tomorrow", "instead"; only if it hasn't shipped), or answer
+  with its status; an unknown order gets "couldn't find";
+- several order numbers: look each up in turn, then summarise (a long run, for the budget);
+- no order number: small talk, no tools.
+
+Like a real model it follows one line of the system prompt: without "Always look an order up"
+it answers from nowhere, without tools (the demo-break patch in ``evals/`` relies on this).
 """
 
 from __future__ import annotations
@@ -11,12 +19,14 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import anthropic
 import httpx2
 
 MOCK_API_KEY = "mock-llm-offline"  # not a credential: the mock transport never leaves the process
+RESCHEDULE_WINDOW = "tomorrow 10:00-10:30"
 
 
 def _text(content: Any) -> str:
@@ -25,33 +35,44 @@ def _text(content: Any) -> str:
     return "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
 
 
-def _tool_uses(messages: list[dict[str, Any]]) -> dict[str, str]:
-    names: dict[str, str] = {}
+@dataclass(frozen=True)
+class _Call:
+    name: str
+    input: dict[str, Any]
+    result: Any  # parsed JSON when possible
+    failed: bool
+
+
+def _calls(messages: list[dict[str, Any]]) -> list[_Call]:
+    """Every tool call so far with its result, in order."""
+    uses: dict[str, dict[str, Any]] = {}
+    calls: list[_Call] = []
     for m in messages:
-        if m["role"] == "assistant" and isinstance(m["content"], list):
-            for b in m["content"]:
-                if b.get("type") == "tool_use":
-                    names[b["id"]] = b["name"]
-    return names
+        if not isinstance(m["content"], list):
+            continue
+        for b in m["content"]:
+            if m["role"] == "assistant" and b.get("type") == "tool_use":
+                uses[b["id"]] = b
+            elif m["role"] == "user" and b.get("type") == "tool_result":
+                use = uses.get(b["tool_use_id"], {})
+                content = b.get("content", "")
+                raw = content if isinstance(content, str) else _text(content)
+                try:
+                    parsed: Any = json.loads(raw)
+                except ValueError:
+                    parsed = raw
+                calls.append(
+                    _Call(
+                        use.get("name", "?"), use.get("input", {}), parsed, bool(b.get("is_error"))
+                    )
+                )
+    return calls
 
 
-def _results(messages: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:
-    """Tool results in the last user message, by tool name: (parsed content, is_error)."""
-    last = messages[-1]["content"]
-    if isinstance(last, str):
-        return {}
-    names = _tool_uses(messages)
-    out: dict[str, tuple[Any, bool]] = {}
-    for b in last:
-        if b.get("type") == "tool_result":
-            content = b.get("content", "")
-            raw = content if isinstance(content, str) else _text(content)
-            try:
-                parsed: Any = json.loads(raw)
-            except ValueError:
-                parsed = raw
-            out[names.get(b["tool_use_id"], "?")] = (parsed, bool(b.get("is_error")))
-    return out
+def _status_line(order: dict[str, Any]) -> str:
+    if order["status"] == "delivered":
+        return f"Order {order['order_id']} was delivered on {order['delivered_at']}."
+    return f"Order {order['order_id']} is {order['status']}; it was placed on {order['placed_at']}."
 
 
 class ScriptedClaude:
@@ -72,69 +93,126 @@ class ScriptedClaude:
 
     def reply(self, body: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
         messages: list[dict[str, Any]] = body["messages"]
+        system = body.get("system") or ""
         question = _text(messages[0]["content"])
-        wants_refund = "refund" in question.lower()
-        results = _results(messages)
+        q = question.lower()
+        calls = _calls(messages)
 
-        if not results:
-            match = re.search(r"\b(\d{3,6})\b", question)
-            if match is None:
-                return [
-                    {"type": "text", "text": "Happy to help! What's your order number?"}
-                ], "end_turn"
-            order_id = match.group(1)
+        if "look an order up" not in _text(system).lower():
             return [
-                {"type": "text", "text": f"Let me look up order {order_id}."},
-                self._tool("lookup_order", {"order_id": order_id}),
+                {
+                    "type": "text",
+                    "text": "Thanks for reaching out! Orders usually arrive within 3-5 business "
+                    "days.",
+                }
+            ], "end_turn"
+
+        order_ids = list(dict.fromkeys(re.findall(r"\b(\d{3,6})\b", question)))
+        if not order_ids:
+            return [
+                {"type": "text", "text": "Happy to help! What's your order number?"}
+            ], "end_turn"
+
+        lookups = {str(c.input.get("order_id")): c for c in calls if c.name == "lookup_order"}
+        pending = [i for i in order_ids if i not in lookups]
+        if pending:
+            return [
+                {"type": "text", "text": f"Let me look up order {pending[0]}."},
+                self._tool("lookup_order", {"order_id": pending[0]}),
             ], "tool_use"
 
-        if "lookup_order" in results:
-            order, failed = results["lookup_order"]
-            if failed:
+        if len(order_ids) > 1:
+            lines = [
+                f"I couldn't find order {i}."
+                if lookups[i].failed
+                else _status_line(lookups[i].result)
+                for i in order_ids
+            ]
+            return [{"type": "text", "text": " ".join(lines)}], "end_turn"
+
+        lookup = lookups[order_ids[0]]
+        if lookup.failed:
+            return [
+                {
+                    "type": "text",
+                    "text": "I couldn't find that order. Could you double-check the number?",
+                }
+            ], "end_turn"
+        order = lookup.result
+        done = {c.name: c for c in calls}
+
+        if "issue_refund" in done:
+            refund = done["issue_refund"]
+            if refund.failed:
+                text = "I couldn't issue that refund, so I've passed it to a colleague."
+            else:
+                text = (
+                    f"Done! I've refunded ${refund.result['amount_usd']:.2f} for order "
+                    f"{refund.result['order_id']} (3-5 business days to reach your card) and "
+                    "drafted a confirmation email to you."
+                )
+            return [{"type": "text", "text": text}], "end_turn"
+
+        if "reschedule_delivery" in done:
+            moved = done["reschedule_delivery"]
+            if moved.failed:
+                text = (
+                    f"Order {order['order_id']} has already left our warehouse, so I can't move "
+                    "its delivery. Sorry!"
+                )
+            else:
+                text = (
+                    f"Order {order['order_id']} hasn't shipped yet, so I've rescheduled the "
+                    f"delivery for {moved.result['window']}. You'll get a text when it's on the "
+                    "way."
+                )
+            return [{"type": "text", "text": text}], "end_turn"
+
+        status = order["status"]
+        if "refund" in q and status == "delivered":
+            amount = order["total_usd"]
+            name = order["customer"]["name"].split()[0]
+            return [
+                {
+                    "type": "text",
+                    "text": f"Order {order['order_id']} was delivered on "
+                    f"{order['delivered_at']}. I'll refund the ${amount:.2f} total.",
+                },
+                self._tool("issue_refund", {"order_id": order["order_id"], "amount": amount}),
+                self._tool(
+                    "draft_email",
+                    {
+                        "to": order["customer"]["email"],
+                        "subject": f"Your refund for order {order['order_id']}",
+                        "body": f"Hi {name},\n\nWe've refunded ${amount:.2f} for order "
+                        f"{order['order_id']}. It should reach your card in 3-5 business "
+                        "days.\n\nLucent Coffee Gear support",
+                    },
+                ),
+            ], "tool_use"
+
+        if any(w in q for w in ("reschedul", "tomorrow", "instead")):
+            if status != "processing":
                 return [
                     {
                         "type": "text",
-                        "text": "I couldn't find that order. Could you double-check the number?",
+                        "text": f"{_status_line(order)} It has already shipped, so its delivery "
+                        "can't be rescheduled.",
                     }
                 ], "end_turn"
-            status = order["status"]
-            if wants_refund and status == "delivered":
-                amount = order["total_usd"]
-                name = order["customer"]["name"].split()[0]
-                return [
-                    {
-                        "type": "text",
-                        "text": f"Order {order['order_id']} was delivered on "
-                        f"{order['delivered_at']}. I'll refund the ${amount:.2f} total.",
-                    },
-                    self._tool("issue_refund", {"order_id": order["order_id"], "amount": amount}),
-                    self._tool(
-                        "draft_email",
-                        {
-                            "to": order["customer"]["email"],
-                            "subject": f"Your refund for order {order['order_id']}",
-                            "body": f"Hi {name},\n\nWe've refunded ${amount:.2f} for order "
-                            f"{order['order_id']}. It should reach your card in 3-5 business "
-                            "days.\n\nLucent Coffee Gear support",
-                        },
-                    ),
-                ], "tool_use"
-            where = (
-                f"was delivered on {order['delivered_at']}"
-                if status == "delivered"
-                else (f"is {status}; it was placed on {order['placed_at']}")
-            )
-            return [{"type": "text", "text": f"Order {order['order_id']} {where}."}], "end_turn"
+            return [
+                {
+                    "type": "text",
+                    "text": f"Order {order['order_id']} hasn't shipped yet, so the delivery can "
+                    "still move.",
+                },
+                self._tool(
+                    "reschedule_delivery",
+                    {"order_id": order["order_id"], "window": RESCHEDULE_WINDOW},
+                ),
+            ], "tool_use"
 
-        refund, refund_failed = results.get("issue_refund", ({}, True))
-        if refund_failed:
-            text = "I couldn't issue that refund, so I've passed it to a colleague."
-        else:
-            text = (
-                f"Done! I've refunded ${refund['amount_usd']:.2f} for order {refund['order_id']} "
-                "(3-5 business days to reach your card) and drafted a confirmation email to you."
-            )
-        return [{"type": "text", "text": text}], "end_turn"
+        return [{"type": "text", "text": _status_line(order)}], "end_turn"
 
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path != "/v1/messages":

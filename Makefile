@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo demo-snapshot site agent
+.PHONY: help install dev down check check-py check-web check-contract fmt test contract demo demo-snapshot site agent eval
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -41,6 +41,9 @@ contract: ## Regenerate contracts/openapi.json and dashboard API types
 
 agent: ## Run the demo agent: make agent Q="Where's order 1042? I want a refund." [ARGS=--mock-llm]
 	uv run python -m support_agent "$(Q)" $(ARGS)
+
+eval: ## Run the eval suite offline against the baseline (add ARGS=... e.g. --update-baseline)
+	uv run lucentpad eval evals/support_agent.yaml --mock --no-post $(ARGS)
 
 demo-snapshot: ## Regenerate the static demo's data (dashboard/src/demo/*.json) from the real API
 	LUCENTPAD_UPDATE_DEMO=1 uv run pytest server/tests/test_demo_snapshot.py -q

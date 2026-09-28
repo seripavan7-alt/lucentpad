@@ -22,6 +22,8 @@ class Price(NamedTuple):
     cache_write_per_mtok: float  # 5-minute cache writes (Anthropic); OpenAI doesn't charge them
 
 
+PRICES_CHECKED = "2026-09-25"
+
 PRICES: dict[str, Price] = {
     # Anthropic: cache hits 0.1x input (0.05x on Opus 5.5), 5-minute writes 1.25x
     "claude-opus-5-5": Price(4.00, 20.00, 0.20, 5.00),

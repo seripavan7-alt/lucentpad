@@ -22,6 +22,9 @@ from lucentpad_server.schema import (
     PREVIEW_MAX_CHARS,
     Attr,
     Attributes,
+    EvalCaseResult,
+    EvalCheckResult,
+    EvalRunIn,
     EventName,
     Span,
     SpanEvent,
@@ -703,6 +706,157 @@ def generate(now: datetime, seed: int = 42) -> list[Span]:
         spans.extend(trace)
     spans.sort(key=lambda s: (s.start_time, s.trace_id, s.span_id))
     return spans
+
+
+# --------------------------------------------------------------------------- eval runs
+
+EVAL_SUITE = "support_agent"
+EVAL_MODEL = SUPPORT_MODEL  # the linked sample traces run on it
+EVAL_CI_URL = "https://github.com/seripavan7-alt/lucentpad/actions/workflows/eval.yml"
+
+# (case, checks, sample trace kind it links to (None: no trace))
+_EVAL_CASES: list[tuple[str, list[str], str | None]] = [
+    ("order_status", ["tool_called: lookup_order", "contains: order"], "status"),
+    (
+        "refund_under_limit",
+        ["tool_called: issue_refund", "max_cost_usd: 0.05"],
+        "refund",
+    ),
+    (
+        "refund_over_limit_blocked",
+        ["no_tool: issue_refund", "contains: colleague"],
+        "guardrail",
+    ),
+    ("unknown_order", ["tool_called: lookup_order", "contains: couldn't find"], "not_found"),
+    ("reschedule_delivery", ["tool_called: reschedule_delivery"], "reschedule"),
+    ("small_talk_no_tool", ["no_tool", "max_latency_ms: 4000"], None),
+]
+# Days before `now` of each run; index 5 is the regression (a prompt change that stopped the
+# agent looking orders up), fixed by the next run.
+_EVAL_DAYS_AGO = [6.7, 5.9, 5.1, 4.2, 3.4, 2.3, 1.6, 0.4]
+_EVAL_REGRESSED = 5
+
+
+def _trace_kinds(spans: list[Span]) -> dict[str, list[Span]]:
+    """Sample support-agent roots by what their run did (the variant, inferred from its spans)."""
+    by_trace: dict[str, list[Span]] = {}
+    for span in spans:
+        if span.source == "sdk":
+            by_trace.setdefault(span.trace_id, []).append(span)
+    kinds: dict[str, list[Span]] = {}
+    for trace in by_trace.values():
+        root = next((s for s in trace if s.parent_span_id is None), None)
+        if root is None or root.status != "ok":
+            continue
+        tools = {s.name: s for s in trace if s.kind == "tool"}
+        events = {e.name for s in trace for e in s.events}
+        if any(s.kind == "guardrail" for s in trace):
+            kind = "guardrail"
+        elif "lookup_order" in tools and tools["lookup_order"].status == "error":
+            kind = "not_found"
+        elif "reschedule_delivery" in tools:
+            kind = "reschedule"
+        elif "issue_refund" in tools and not events & {EventName.BUDGET_ALERT, EventName.FAILOVER}:
+            kind = "refund"
+        elif set(tools) == {"lookup_order"} and not events:
+            kind = "status"
+        else:
+            continue
+        kinds.setdefault(kind, []).append(root)
+    for roots in kinds.values():
+        roots.sort(key=lambda r: r.start_time)
+    return kinds
+
+
+def _trace_cost(spans: list[Span], trace_id: str) -> float:
+    total = 0.0
+    for span in spans:
+        cost = span.attributes.get(Attr.COST_USD)
+        if span.trace_id == trace_id and isinstance(cost, int | float):
+            total += float(cost)
+    return round(total, 8)
+
+
+def eval_runs(now: datetime, spans: list[Span] | None = None, seed: int = 42) -> list[EvalRunIn]:
+    """About a week of `lucentpad eval` runs of the demo suite, oldest first: all passing but
+    one regression (``order_status`` stopped calling ``lookup_order``). Cases link to sample
+    traces of the same kind (``spans``: the sample, default ``generate(now, seed)``)."""
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    spans = spans if spans is not None else generate(now, seed)
+    kinds = _trace_kinds(spans)
+    rng = random.Random(seed ^ 0xE7A1)  # noqa: S311 - sample data
+    runs: list[EvalRunIn] = []
+    baseline_cost: float | None = None
+    for i, days in enumerate(_EVAL_DAYS_AGO):
+        started = (now - timedelta(days=days)).replace(microsecond=0)
+        regressed = i == _EVAL_REGRESSED
+        cases: list[EvalCaseResult] = []
+        for name, checks, kind in _EVAL_CASES:
+            roots = kinds.get(kind, []) if kind else []
+            root = roots[(i * 5 + len(name)) % len(roots)] if roots else None
+            failing = regressed and name == "order_status"
+            if root is not None and not failing:
+                trace_id: str | None = root.trace_id
+                cost: float | None = _trace_cost(spans, root.trace_id)
+                latency = (root.end_time - root.start_time).total_seconds() * 1000
+                out = root.attributes.get(Attr.OUTPUT_PREVIEW)
+                preview = out if isinstance(out, str) else None
+            else:
+                trace_id = None
+                cost = round(rng.uniform(0.0012, 0.0031), 6)
+                latency = rng.uniform(900, 2400)
+                preview = (
+                    "Thanks for reaching out! Orders usually arrive within 3-5 business days."
+                    if failing
+                    else "Happy to help! Is there an order I can look up for you?"
+                )
+            results = [
+                EvalCheckResult(
+                    check=check,
+                    passed=not (failing and check.startswith(("tool_called", "contains"))),
+                    detail=(
+                        "no call to lookup_order"
+                        if failing and check.startswith("tool_called")
+                        else "output does not mention the order"
+                        if failing and check.startswith("contains")
+                        else None
+                    ),
+                )
+                for check in checks
+            ]
+            cases.append(
+                EvalCaseResult(
+                    case=name,
+                    passed=all(r.passed for r in results),
+                    baseline_passed=None if i == 0 else True,
+                    checks=results,
+                    cost_usd=cost,
+                    latency_ms=round(latency, 1),
+                    trace_id=trace_id,
+                    output_preview=preview,
+                )
+            )
+        total = round(sum(c.cost_usd or 0.0 for c in cases), 6)
+        on_ci = i % 3 != 1
+        runs.append(
+            EvalRunIn(
+                suite=EVAL_SUITE,
+                status="regressed" if regressed else "passed",
+                started_at=started,
+                duration_ms=round(sum(c.latency_ms or 0.0 for c in cases) + rng.uniform(300, 900)),
+                model=EVAL_MODEL,
+                git_sha=f"{rng.getrandbits(160):040x}",
+                git_ref="shorter-replies" if regressed else "main",
+                ci_url=EVAL_CI_URL if on_ci or regressed else None,
+                cost_usd=total,
+                baseline_cost_usd=baseline_cost,
+                cases=cases,
+            )
+        )
+        if not regressed:
+            baseline_cost = total
+    return runs
 
 
 def _shift(span: Span, delta: timedelta) -> Span:

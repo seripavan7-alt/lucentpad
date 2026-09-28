@@ -1,0 +1,50 @@
+name: Eval
+
+# The eval gate (D25, demo step 8): runs the demo support agent's eval suite against a real model
+# (Claude Haiku 4.5, ~6 cases, a few cents) when the agent, its evals or the SDK change, and
+# fails the check on a regression against evals/baseline.json.
+#
+# Needs the repository secret ANTHROPIC_API_KEY. Without it (forks, or before the secret is set)
+# the job prints a notice and passes. Optional repository variable LUCENTPAD_ENDPOINT: a
+# LucentPad API to read traces from and post the run to; without it the run is checked on the
+# spans recorded in the job itself and isn't posted.
+
+on:
+  pull_request:
+    paths:
+      - "examples/**"
+      - "evals/**"
+      - "sdk/**"
+      - ".github/workflows/eval.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LUCENTPAD_ENDPOINT: ${{ vars.LUCENTPAD_ENDPOINT }}
+    steps:
+      - name: Skip without an API key
+        if: env.ANTHROPIC_API_KEY == ''
+        run: echo "::notice title=lucentpad eval skipped::No ANTHROPIC_API_KEY secret, so the eval gate did not run. Add the repository secret to enable it."
+      - uses: actions/checkout@v4
+        if: env.ANTHROPIC_API_KEY != ''
+      - uses: astral-sh/setup-uv@v6
+        if: env.ANTHROPIC_API_KEY != ''
+        with:
+          enable-cache: true
+      - name: Install
+        if: env.ANTHROPIC_API_KEY != ''
+        run: uv sync
+      - name: lucentpad eval
+        if: env.ANTHROPIC_API_KEY != ''
+        run: uv run lucentpad eval evals/support_agent.yaml --model claude-haiku-4-5 --max-cost 0.10

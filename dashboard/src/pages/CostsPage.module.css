@@ -1,0 +1,4 @@
+.body {
+  min-width: 0;
+  padding: 0 0 var(--space-8);
+}

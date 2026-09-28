@@ -29,8 +29,8 @@ const ROADMAP: [string, string, "done" | "next" | "later"][] = [
   ["Dashboard, sample data, CI", "M0", "done"],
   ["Python SDK and the live waterfall", "M1", "done"],
   ["Gateway for Claude Code and Copilot", "M2", "done"],
-  ["Guardrails, budgets, cost reports, eval gate", "M3", "next"],
-  ["Hosted demo, docs and a short video", "M4", "later"],
+  ["Guardrails, budgets, cost reports, eval gate", "M3", "done"],
+  ["Hosted demo, docs and a short video", "M4", "next"],
 ];
 
 function seconds(ms: number): string {

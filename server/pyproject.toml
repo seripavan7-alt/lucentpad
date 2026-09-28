@@ -10,7 +10,12 @@ dependencies = [
   "pydantic>=2.8",
   "asyncpg>=0.29",
   "httpx>=0.27",  # gateway upstream client
+  "lucentpad-sdk",  # shared guardrail engine (lucentpad.guardrails); no provider extras
+  "pyyaml>=6",  # LUCENTPAD_RULES_FILE
 ]
+
+[tool.uv.sources]
+lucentpad-sdk = { workspace = true }
 
 [project.scripts]
 lucentpad-server = "lucentpad_server.__main__:main"

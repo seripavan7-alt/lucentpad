@@ -1,0 +1,10 @@
+# The server's built-in guardrail rules (lucentpad_server/guardrails/rules.py, BUILT_IN_RULES),
+# for runs without the LucentPad API: `python -m support_agent --local-rules` and
+# `lucentpad eval --mock` (evals/support_agent.yaml points here). A test keeps them equal.
+rules:
+  - id: refund_limit
+    type: tool
+    description: "Demo support agent: refunds above the automatic limit need a person."
+    tool: issue_refund
+    condition: amount > 200
+    message: Refunds over $200 need a human to approve them.

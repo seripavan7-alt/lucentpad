@@ -10,6 +10,9 @@
 - ``LUCENTPAD_GATEWAY_READ_TIMEOUT``: seconds between upstream bytes before a call fails (600).
 - ``LUCENTPAD_GATEWAY_CAPTURE_CONTENT``: ``0`` stops recording prompt/response previews.
 - ``LUCENTPAD_GATEWAY_CLIENT_UA``: extra User-Agent rules ``client=substring,...`` (``clients``).
+- ``LUCENTPAD_GATEWAY_SESSION_BUDGET_USD``: per-session budget; the turn whose estimated cost
+  takes a session past it gets a ``lucentpad.budget.alert`` event (alert only, never blocks).
+  Unset (default) or ``0``: off.
 
 Without ``LUCENTPAD_KEY_SALT`` the salt is random per process, so key fingerprints change on
 restart: key-based sessions (no client session header) don't continue across a restart, and
@@ -47,6 +50,14 @@ def _float(name: str, default: float) -> float:
     return float(raw) if raw else default
 
 
+def _budget(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    value = float(raw)
+    return value if value > 0 else None
+
+
 def _client_rules(raw: str) -> tuple[tuple[str, str], ...]:
     rules: list[tuple[str, str]] = []
     for item in raw.split(","):
@@ -72,6 +83,8 @@ class GatewayConfig:
     extra_client_rules: tuple[tuple[str, str], ...] = ()
     """``(client, lowercase User-Agent substring)`` checked before the built-in rules."""
     fallback_models: dict[str, str] = field(default_factory=lambda: dict(FALLBACK_MODELS))
+    session_budget_usd: float | None = None
+    """Per-session budget alert threshold (USD); None = off."""
 
     def upstream(self, provider: str) -> str:
         return self.anthropic_upstream if provider == "anthropic" else self.openai_upstream
@@ -94,4 +107,5 @@ class GatewayConfig:
             read_timeout_s=_float("LUCENTPAD_GATEWAY_READ_TIMEOUT", 600.0),
             capture_content=_flag("LUCENTPAD_GATEWAY_CAPTURE_CONTENT", True),
             extra_client_rules=_client_rules(os.environ.get("LUCENTPAD_GATEWAY_CLIENT_UA", "")),
+            session_budget_usd=_budget("LUCENTPAD_GATEWAY_SESSION_BUDGET_USD"),
         )

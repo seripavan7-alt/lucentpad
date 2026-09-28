@@ -4,10 +4,34 @@
 Source of truth: `docs/PRD.md`. Process: plan → "go" → build → checkpoint → "approved" → commit `M<n>: <title>`.
 
 ## Now
-- **Milestone:** M3 Guardrails, costs, evals. **Plan drafted** in `docs/handoff/M3.md`; waiting for the user's step-0 answers (D20–D28) and "go".
+- **Milestone:** M3 Guardrails, costs, evals: ✅ **approved 2026-09-27**, committed `M3: Guardrails, costs, evals` and pushed. Next: **M4 Ship** (not planned yet).
 - **Live:** repo https://github.com/seripavan7-alt/lucentpad · site https://seripavan7-alt.github.io/lucentpad/
-- **Next action:** get D20–D28 answered, then M3 step 1 (contract).
-- **Blockers:** none.
+- **Next action:** draft the M4 plan (`docs/handoff/M4.md`: hosted GCP demo, README, usage docs, video, load test) and wait for the user's "go".
+- **Blockers:** none. Live eval check on GitHub needs an `ANTHROPIC_API_KEY` repo secret (optional; the workflow skips without it).
+
+## M3 contract notes
+- Engine API (stub): `sdk/lucentpad/guardrails/__init__.py`: `redact(text)->Redacted`, `parse_rules(data)->list[Rule]`,
+  `check_prompt(rules,text)->Block|None`, `check_tool(rules,tool,args)->Block|None`. The server depends on
+  `lucentpad-sdk` (workspace) to use it; Dockerfile copies `sdk/`. `pyyaml` in both.
+- Routes: `GET /v1/guardrails/rules` (→ `app.state.guardrails: GuardrailProvider`, `server/lucentpad_server/guardrails/`),
+  `GET /v1/guardrails/events?from&to&kind*&limit&cursor&since&hide_sample`, `GET /v1/guardrails/summary`,
+  `GET /v1/pricing` (implemented; `PRICES_CHECKED`), `GET /v1/costs?from&to&group_by=model|client|service&hide_sample`,
+  `POST /v1/evals/runs` (201), `GET /v1/evals/runs?suite&limit&cursor`, `GET /v1/evals/runs/{id}`. Store stubs → 501.
+- Schema: `GuardrailRule(s)`, `GuardrailEvent(List)`, `GuardrailSummary`, `ModelPrice`, `PriceTable`, `CostPoint`,
+  `CostSeries`, `EvalRunIn`/`EvalRun`/`EvalRunSummary`/`EvalRunList`, `EvalCaseResult`, `EvalCheckResult`.
+  New Attr: `GUARDRAIL_REASON`, `BUDGET_SCOPE`, `EVAL_RUN_ID`, `EVAL_CASE`.
+
+## M3 step log
+| Step | State | Owner / date | Handoff notes |
+| --- | --- | --- | --- |
+| 0 Decisions D20–D28 | ✅ | lead 2026-09-27 | Defaults; live eval check deferred (no key). |
+| 1 Contract | ✅ | lead 2026-09-27 | See **M3 contract notes**. |
+| 2 Guardrail engine + redaction (`sdk/lucentpad/guardrails/`) | ✅ | sdk agent 2026-09-27 | Detectors: Anthropic/OpenAI/GitHub/AWS keys, Bearer tokens, emails, Luhn cards (first digit 2–6, card-like grouping, not adjacent to id chars). ~18–21 µs per 2 kB. Tool conditions: hand-written parser (comparisons, in/not in, and/or, parens, dotted fields); missing field never matches. |
+| 3 Server: rules, pricing, ingest redaction, gateway enforcement, queries | ✅ | backend agent 2026-09-27 | `guardrails/{rules,redaction}.py`; env `LUCENTPAD_RULES_FILE` (YAML, reload on mtime; built-in `refund_limit` when unset), `LUCENTPAD_GATEWAY_SESSION_BUDGET_USD`. Ingest redaction in the writer thread (~9–49 µs/span). Gateway: prompt block → provider-shaped 400 + guardrail span; session budget alert once. Migration 0006: `guardrail_events` (filled by the writer, backfilled), `spans_cost_time_idx`, bucket statistics, `eval_runs`. Sample eval runs (8, one regressed) seeded; parity keys `guardrail_events`, `guardrail_summary`, `costs`, `eval_runs`; snapshot keys `eval_runs`, `guardrail_rules`. Lead did: broken rules file at startup → built-in rules stay active; types-PyYAML added. |
+| 4 SDK: guardrails + budgets | ✅ | sdk agent 2026-09-27 | `GuardrailBlocked`, `BudgetExceeded`; `init(rules=, default_budget_usd=)`; `trace(budget_usd=, on_budget="alert"|"stop")`. Rules+prices fetched in a daemon thread (60 s; 5 s when down; keep last known on errors, clear on 404/501); first guardrail check waits ≤0.5 s once for rules. Redaction of all SDK strings at span end (captures +512 chars, cuts after redacting). Gaps: only last user message text checked; no AWS secret/Google/Slack/Stripe keys; parallel async calls can both pass a stop check. |
+| 5 Demo agent + eval gate | ✅ | agent agent 2026-09-27 | Agent: catches `GuardrailBlocked` → handoff reply; `--budget USD`, `--local-rules` (rules.yaml = server built-in), tool previews carry args/results (email redacted by the SDK); new tool `reschedule_delivery`, order 1061. `lucentpad eval SUITE [--baseline] [--update-baseline] [--max-cost] [--endpoint] [--model] [--no-post] [--mock]` (exit 1 regression/cost > 1.25×/max-cost, 2 usage). `evals/support_agent.yaml` (6 cases, Haiku), mock `baseline.json`, `demo-break-prompt.patch` (→ 5 regressions), `.github/workflows/eval.yml` (skips with a notice without `ANTHROPIC_API_KEY`). `make eval`. |
+| 6 Dashboard: Costs, Guardrails, Evals | ✅ | dashboard agent 2026-09-27 | Pages Costs (`?range`, `?group`), Guardrails (`?range`, `?kind`), Evals (+ `/evals/:runId`); hand-drawn SVG stacked columns per the dataviz skill (`--chart-1..6`, `--chart-other` tokens); PlaceholderPage removed. Adapter covers all M3 endpoints (32 parity cases). Gaps: server side closed by lead (budget alerts as guardrail events kind `budget`, migration 0007; `GuardrailSummary.budget_alerts`; `EvalRunSummary.baseline_cost_usd`; `hide_sample` on eval runs); dashboard side done (Costs budget alerts list, Guardrails Budget filter + tile, Evals cost vs baseline, hide_sample). |
+| 7 Integration + checkpoint | ✅ | lead 2026-09-27 | Approved by the user 2026-09-27; home page roadmap marks M3 done, M4 next. Local stack (migrations 0005–0007): mock agent runs show step 3 (email never stored, `[REDACTED:email]`), step 4 (`refund_limit` block span, polite handoff), step 5 (budget alert with `--budget 0.001`); step 8 offline: break patch → 5 regressions, exit 1; runs visible on Evals. `make check` green (646 py + 330 web). Waiting: user's "approved"; live GitHub eval check deferred (no key). |
 
 ## M2 step log
 | Step | State | Owner / date | Handoff notes |
@@ -126,6 +150,7 @@ Claim a step by setting it to 🟡 before starting. Fill the handoff notes when 
 ## Decisions log
 | Date | Decision |
 | --- | --- |
+| 2026-09-27 | **M3 "go"** with D20–D28 as recommended in `docs/handoff/M3.md`. No Anthropic key yet: the eval gate is built and tested in mock mode; the live GitHub eval check (D25 secret, D28 PR) is an action item for when a key exists. |
 | 2026-09-27 | Sample data is labelled (`spans.sample`/`traces.sample`, migration 0005 backfills existing DBs). `GET /v1/data` → `{sample_data, real_data}`; `hide_sample` param on traces, facets, gateway turns/summary. Dashboard: small "Sample" tag and a "Hide sample data" switch in the sidebar, both shown only when real data exists too (never in the static demo). |
 | 2026-09-25 | M2 "go" with D16–D19 as recommended. |
 | 2026-09-25 | M2 D14: user has **Anthropic + OpenAI** keys for the live checks (Claude Code + Copilot CLI on Anthropic, Copilot Chat Custom Endpoint on OpenAI). D15: Claude Code signs in with an **Anthropic API key**. Copilot is traceable only in BYOK mode (documented in M2.md). D16–D19: recommendations pending the user's "go". |

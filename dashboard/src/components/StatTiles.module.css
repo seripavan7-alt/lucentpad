@@ -1,0 +1,53 @@
+/* Quiet number tiles in a row (up to four across), two per row on narrow screens. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(min(var(--tile-count, 3), 4), minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+}
+
+@media (max-width: 720px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: var(--space-4);
+  }
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* Proportional figures at display size (tabular only in columns). */
+.value {
+  margin: 2px 0 4px;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.tile[data-empty="true"] .value {
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-medium);
+}
+
+.meta {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

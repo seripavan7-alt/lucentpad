@@ -1,0 +1,27 @@
+.ruleId {
+  color: var(--color-text);
+}
+
+/* Blocks carry the blocked tone (as the status badge does), budget alerts the warning tone;
+   redactions stay neutral. */
+.kind {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.kind[data-kind="block"] {
+  color: var(--color-blocked);
+  background: var(--color-blocked-subtle);
+}
+
+.kind[data-kind="budget"] {
+  color: var(--color-warning);
+  background: var(--color-warning-subtle);
+}

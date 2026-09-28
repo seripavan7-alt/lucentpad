@@ -13,11 +13,12 @@ import binascii
 import hashlib
 import json
 import math
+import secrets
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 import asyncpg
 
@@ -28,7 +29,14 @@ from lucentpad_server.schema import (
     PREVIEW_MAX_CHARS,
     Attr,
     Attributes,
+    CostGroup,
+    CostPoint,
+    CostSeries,
     DataInfo,
+    EvalRun,
+    EvalRunIn,
+    EvalRunList,
+    EvalRunSummary,
     EventName,
     FacetValue,
     GatewayClientTotals,
@@ -36,6 +44,11 @@ from lucentpad_server.schema import (
     GatewaySummary,
     GatewayTurn,
     GatewayTurnList,
+    GuardrailEvent,
+    GuardrailEventKind,
+    GuardrailEventList,
+    GuardrailRuleCount,
+    GuardrailSummary,
     Span,
     TraceDetail,
     TraceFacets,
@@ -69,6 +82,10 @@ _CREATE_STAGE = """
 CREATE TEMP TABLE IF NOT EXISTS spans_stage (LIKE spans INCLUDING DEFAULTS) ON COMMIT DELETE ROWS
 """
 
+# Guardrail events (`gev`, M3): each new kind='guardrail' span and each `lucentpad.redaction` event
+# of a new span becomes a guardrail_events row (migration 0006 has the same projection for its
+# backfill). Attribute keys are inlined literals: Attr.CLIENT, GUARDRAIL_RULE, GUARDRAIL_REASON,
+# REDACTION_KIND, REDACTION_COUNT and EventName.REDACTION (test_store_guardrails checks them).
 # Root-derived fields prefer the root span (parent_span_id IS NULL), falling back to the
 # earliest span until the root arrives. Aggregates only cover rows actually inserted.
 # Previews ($1 = input attribute key, $2 = output key): candidates are the root and llm spans
@@ -164,6 +181,42 @@ ON CONFLICT (trace_id) DO UPDATE SET
     sample = t.sample OR excluded.sample,
     updated_at = now()
 RETURNING 1
+), gev AS (
+INSERT INTO guardrail_events
+    (trace_id, span_id, seq, kind, time, source, client, rule, reason, redaction_kind, count,
+     sample, budget_limit_usd, budget_spent_usd, budget_scope)
+SELECT trace_id, span_id, 0, 'block', start_time, source, attributes ->> 'lucentpad.client',
+       attributes ->> 'lucentpad.guardrail.rule',
+       coalesce(attributes ->> 'lucentpad.guardrail.reason', status_message),
+       NULL, 1, sample, NULL::float8, NULL::float8, NULL
+FROM ins WHERE kind = 'guardrail'
+UNION ALL
+SELECT i.trace_id, i.span_id, e.seq::integer, 'redaction', (e.ev ->> 'time')::timestamptz,
+       i.source, i.attributes ->> 'lucentpad.client', NULL, NULL,
+       left(coalesce(e.ev -> 'attributes' ->> 'lucentpad.redaction.kind', 'unknown'), 100),
+       CASE WHEN jsonb_typeof(e.ev -> 'attributes' -> 'lucentpad.redaction.count') = 'number'
+            THEN least(greatest((e.ev -> 'attributes' ->> 'lucentpad.redaction.count')::numeric,
+                                0), 2147483647)::integer
+            ELSE 1 END,
+       i.sample, NULL, NULL, NULL
+FROM ins AS i
+CROSS JOIN LATERAL jsonb_array_elements(i.events) WITH ORDINALITY AS e(ev, seq)
+WHERE i.events @> '[{"name": "lucentpad.redaction"}]'
+  AND e.ev ->> 'name' = 'lucentpad.redaction'
+UNION ALL
+SELECT i.trace_id, i.span_id, e.seq::integer, 'budget', (e.ev ->> 'time')::timestamptz,
+       i.source, i.attributes ->> 'lucentpad.client', NULL, NULL, NULL, 1, i.sample,
+       CASE WHEN jsonb_typeof(e.ev -> 'attributes' -> 'lucentpad.budget.limit_usd') = 'number'
+            THEN (e.ev -> 'attributes' ->> 'lucentpad.budget.limit_usd')::float8 END,
+       CASE WHEN jsonb_typeof(e.ev -> 'attributes' -> 'lucentpad.budget.spent_usd') = 'number'
+            THEN (e.ev -> 'attributes' ->> 'lucentpad.budget.spent_usd')::float8 END,
+       left(e.ev -> 'attributes' ->> 'lucentpad.budget.scope', 20)
+FROM ins AS i
+CROSS JOIN LATERAL jsonb_array_elements(i.events) WITH ORDINALITY AS e(ev, seq)
+WHERE i.events @> '[{"name": "lucentpad.budget.alert"}]'
+  AND e.ev ->> 'name' = 'lucentpad.budget.alert'
+ON CONFLICT DO NOTHING
+RETURNING 1
 )
 SELECT count(*) FROM ins
 """
@@ -195,6 +248,10 @@ UPDATE traces SET
     input_preview_key = input_preview_key + $1,
     output_preview_key = output_preview_key + $1
 """
+_SHIFT_OTHERS = (
+    "UPDATE guardrail_events SET time = time + $1",
+    "UPDATE eval_runs SET started_at = started_at + $1 WHERE sample",
+)
 
 LIVE_OVERLAP: Final = timedelta(seconds=2)
 """``since`` polls look back this much before the client's ``since``, so a write that
@@ -661,6 +718,175 @@ def _gateway_turn(row: asyncpg.Record) -> GatewayTurn:
     )
 
 
+# --------------------------------------------------------------------------- M3
+
+
+def _events_window(
+    start: datetime | None, end: datetime | None, args: list[Any], hide_sample: bool
+) -> list[str]:
+    where = ["NOT sample"] if hide_sample else []
+    if start is not None:
+        args.append(start)
+        where.append(f"time >= ${len(args)}")
+    if end is not None:
+        args.append(end)
+        where.append(f"time < ${len(args)}")
+    return where
+
+
+def _events_fingerprint(
+    start: datetime | None,
+    end: datetime | None,
+    kinds: tuple[str, ...],
+    hide_sample: bool,
+) -> str:
+    wanted = sorted(set(kinds))
+    data = {
+        "from": start.isoformat() if start else None,
+        "to": end.isoformat() if end else None,
+        # Every kind is the same query as none.
+        "kind": wanted if len(wanted) < len(get_args(GuardrailEventKind)) else [],
+        "hide_sample": hide_sample,
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class EventCursor:
+    """Keyset position after the last guardrail event of a page, bound to its filters."""
+
+    time: datetime
+    trace_id: str
+    span_id: str
+    seq: int
+    fingerprint: str
+
+    def encode(self) -> str:
+        raw = json.dumps(
+            {
+                "e": 1,
+                "k": self.time.isoformat(),
+                "t": self.trace_id,
+                "s": self.span_id,
+                "q": self.seq,
+                "f": self.fingerprint,
+            }
+        ).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    @classmethod
+    def decode(cls, token: str) -> EventCursor:
+        try:
+            data = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+            if data["e"] != 1:
+                raise ValueError("not an events cursor")
+            time = datetime.fromisoformat(data["k"])
+            trace_id, span_id, seq, fingerprint = data["t"], data["s"], data["q"], data["f"]
+        except (binascii.Error, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        if (
+            time.tzinfo is None
+            or not all(isinstance(v, str) for v in (trace_id, span_id, fingerprint))
+            or not isinstance(seq, int)
+            or isinstance(seq, bool)
+            or not 0 <= seq < 2**31
+        ):
+            raise InvalidCursorError("invalid cursor")
+        return cls(time, trace_id, span_id, seq, fingerprint)
+
+
+def _guardrail_event(row: asyncpg.Record) -> GuardrailEvent:
+    return GuardrailEvent(
+        kind=row["kind"],
+        time=row["time"],
+        trace_id=row["trace_id"],
+        span_id=row["span_id"],
+        source=row["source"],
+        client=row["client"],
+        rule=row["rule"],
+        reason=row["reason"],
+        redaction_kind=row["redaction_kind"],
+        count=row["count"],
+        budget_limit_usd=row["budget_limit_usd"],
+        budget_spent_usd=row["budget_spent_usd"],
+        budget_scope=row["budget_scope"],
+    )
+
+
+def bucket_seconds_for(window: timedelta) -> int:
+    """Cost series bucket size: 5 minutes up to a 2-hour window, 1 hour up to 2 days, else
+    1 day."""
+    if window <= timedelta(hours=2):
+        return 300
+    if window <= timedelta(days=2):
+        return 3600
+    return 86400
+
+
+_COST_GROUPS: Final[dict[CostGroup, str]] = {
+    "model": "model",
+    "client": f"(attributes ->> {_sql_str(Attr.CLIENT)})",
+    "service": f"(attributes ->> {_sql_str(Attr.SERVICE_NAME)})",
+}
+
+_EVAL_IN_COLUMNS: Final = (
+    "suite",
+    "status",
+    "started_at",
+    "duration_ms",
+    "model",
+    "git_sha",
+    "git_ref",
+    "ci_url",
+    "cost_usd",
+    "baseline_cost_usd",
+    "cases",
+)
+_EVAL_COLUMNS: Final = (
+    "id",
+    *_EVAL_IN_COLUMNS[:-1],
+    "passed",
+    "failed",
+    "regressions",
+    "cases",
+    "sample",
+)
+
+
+def _sample_run_id(run: EvalRunIn) -> str:
+    key = f"lucentpad-sample-eval\0{run.suite}\0{run.started_at.isoformat()}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class EvalCursor:
+    """Keyset position after the last eval run of a page, bound to its suite filter."""
+
+    started_at: datetime
+    run_id: str
+    fingerprint: str
+
+    def encode(self) -> str:
+        raw = json.dumps(
+            {"v": 1, "k": self.started_at.isoformat(), "id": self.run_id, "f": self.fingerprint}
+        ).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    @classmethod
+    def decode(cls, token: str) -> EvalCursor:
+        try:
+            data = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+            if data["v"] != 1:
+                raise ValueError("not an eval cursor")
+            started_at = datetime.fromisoformat(data["k"])
+            run_id, fingerprint = data["id"], data["f"]
+        except (binascii.Error, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        if started_at.tzinfo is None or not all(isinstance(v, str) for v in (run_id, fingerprint)):
+            raise InvalidCursorError("invalid cursor")
+        return cls(started_at, run_id, fingerprint)
+
+
 class SpanStore:
     """Span and trace persistence over an asyncpg pool."""
 
@@ -732,6 +958,8 @@ class SpanStore:
                 return None
             await conn.execute(_SHIFT_SPANS, delta)
             await conn.execute(_SHIFT_TRACES, delta)
+            for statement in _SHIFT_OTHERS:
+                await conn.execute(statement, delta)
             await conn.execute(
                 """
                 INSERT INTO lucentpad_meta (key, value) VALUES ('sample_shifted_at', now()::text)
@@ -909,3 +1137,268 @@ class SpanStore:
             ],
             as_of=as_of,
         )
+
+    # ------------------------------------------------------------------ M3: guardrails
+
+    async def guardrail_events(
+        self,
+        *,
+        start: datetime | None,
+        end: datetime | None,
+        kinds: tuple[GuardrailEventKind, ...],
+        limit: int,
+        cursor: str | None,
+        since: datetime | None,
+        hide_sample: bool = False,
+    ) -> GuardrailEventList:
+        """Blocks and redactions with ``time`` in [start, end), newest first by (time, trace_id,
+        span_id, seq), optionally only the given kinds. Raises ``InvalidCursorError`` for a
+        cursor from another filter set.
+
+        With ``since`` (live polling): only events stored after ``since - LIVE_OVERLAP``, at most
+        ``limit`` of them, and never a next cursor.
+        """
+        fingerprint = _events_fingerprint(start, end, kinds, hide_sample)
+        after = EventCursor.decode(cursor) if cursor is not None else None
+        if after is not None and after.fingerprint != fingerprint:
+            raise InvalidCursorError("cursor was issued for another filter set")
+        args: list[Any] = []
+        where = _events_window(start, end, args, hide_sample)
+        wanted = sorted(set(kinds))
+        if 0 < len(wanted) < len(get_args(GuardrailEventKind)):
+            args.append(wanted)
+            where.append(f"kind = ANY(${len(args)}::text[])")
+        if since is not None:
+            args.append(since - LIVE_OVERLAP)
+            where.append(f"stored_at > ${len(args)}")
+        if after is not None:
+            args += [after.time, after.trace_id, after.span_id, after.seq]
+            n = len(args)
+            where.append(
+                f"(time, trace_id, span_id, seq) < (${n - 3}::timestamptz, ${n - 2}, ${n - 1},"
+                f" ${n}::integer)"
+            )
+        args.append(limit + 1)
+        sql = (
+            f"SELECT *, now() AS as_of FROM guardrail_events{_where(where)}"  # noqa: S608
+            f" ORDER BY time DESC, trace_id DESC, span_id DESC, seq DESC LIMIT ${len(args)}"
+        )
+        async with self._pool.acquire() as conn:
+            rows: Sequence[asyncpg.Record] = await conn.fetch(sql, *args)
+            as_of: datetime = rows[0]["as_of"] if rows else await conn.fetchval("SELECT now()")
+        next_cursor = None
+        if len(rows) > limit and since is None:
+            last = rows[limit - 1]
+            next_cursor = EventCursor(
+                last["time"], last["trace_id"], last["span_id"], last["seq"], fingerprint
+            ).encode()
+        return GuardrailEventList(
+            events=[_guardrail_event(r) for r in rows[:limit]], next_cursor=next_cursor, as_of=as_of
+        )
+
+    async def guardrail_summary(
+        self, *, start: datetime | None, end: datetime | None, hide_sample: bool = False
+    ) -> GuardrailSummary:
+        """Blocks per rule (count of blocked calls) and redactions per kind (number of values
+        replaced) for events with ``time`` in [start, end); by count descending, then name."""
+        args: list[Any] = []
+        where = _events_window(start, end, args, hide_sample)
+        blocks = _where([*where, "kind = 'block'"])
+        redactions = _where([*where, "kind = 'redaction'"])
+        sql = (
+            "SELECT 'block' AS k, coalesce(rule, 'unknown') AS v, count(*) AS n"  # noqa: S608
+            f" FROM guardrail_events{blocks} GROUP BY 2"
+            " UNION ALL SELECT 'redaction', redaction_kind, sum(count)"
+            f" FROM guardrail_events{redactions} GROUP BY 2"
+            " UNION ALL SELECT 'budget', 'budget', count(*)"
+            f" FROM guardrail_events{_where([*where, "kind = 'budget'"])}"
+        )
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+            as_of: datetime = await conn.fetchval("SELECT now()")
+        ordered = sorted(rows, key=lambda r: (-int(r["n"]), r["v"]))
+        return GuardrailSummary(
+            blocks=[
+                GuardrailRuleCount(rule=r["v"], blocks=int(r["n"]))
+                for r in ordered
+                if r["k"] == "block"
+            ],
+            redactions=[
+                FacetValue(value=r["v"], count=int(r["n"]))
+                for r in ordered
+                if r["k"] == "redaction"
+            ],
+            budget_alerts=sum(int(r["n"]) for r in rows if r["k"] == "budget"),
+            as_of=as_of,
+        )
+
+    # ------------------------------------------------------------------ M3: costs
+
+    async def cost_series(
+        self,
+        *,
+        start: datetime | None,
+        end: datetime | None,
+        group_by: CostGroup,
+        hide_sample: bool = False,
+    ) -> CostSeries:
+        """Spend of spans with a cost and ``start_time`` in [start, end), per aligned time bucket
+        (``date_bin`` from the Unix epoch, so UTC-aligned) and group (the span's model,
+        ``lucentpad.client`` or ``service.name``; ``other`` when unset). The bucket size follows
+        the window (``bucket_seconds_for``); an open start uses the oldest priced span, an open
+        end the server's now."""
+        args: list[Any] = []
+        where = ["cost_usd IS NOT NULL", *(["NOT sample"] if hide_sample else [])]
+        if start is not None:
+            args.append(start)
+            where.append(f"start_time >= ${len(args)}")
+        if end is not None:
+            args.append(end)
+            where.append(f"start_time < ${len(args)}")
+        async with self._pool.acquire() as conn:
+            as_of: datetime = await conn.fetchval("SELECT now()")
+            lo = start
+            if lo is None:
+                lo = await conn.fetchval(
+                    f"SELECT min(start_time) FROM spans{_where(where)}",  # noqa: S608
+                    *args,
+                )
+            hi = end if end is not None else as_of
+            bucket = bucket_seconds_for((hi - lo) if lo is not None else timedelta(0))
+            # Inlined (one of three ints) to match migration 0006's expression statistics.
+            bin_sql = (
+                f"date_bin('{int(bucket)} seconds'::interval, start_time, 'epoch'::timestamptz)"
+            )
+            group = _COST_GROUPS[group_by]
+            rows = await conn.fetch(
+                f"SELECT {bin_sql} AS bucket,"  # noqa: S608
+                f" coalesce({group}, 'other') AS grp, sum(cost_usd) AS cost,"
+                " coalesce(sum(input_tokens), 0) AS input_tokens,"
+                " coalesce(sum(output_tokens), 0) AS output_tokens, count(*) AS calls"
+                f" FROM spans{_where(where)} GROUP BY 1, 2"
+                f" ORDER BY 1, coalesce({group}, 'other') COLLATE \"C\"",
+                *args,
+            )
+        total = sum((r["cost"] for r in rows), Decimal(0))
+        return CostSeries(
+            points=[
+                CostPoint(
+                    bucket=r["bucket"],
+                    group=r["grp"],
+                    cost_usd=float(r["cost"]),
+                    input_tokens=int(r["input_tokens"]),
+                    output_tokens=int(r["output_tokens"]),
+                    calls=int(r["calls"]),
+                )
+                for r in rows
+            ],
+            bucket_seconds=bucket,
+            group_by=group_by,
+            total_cost_usd=float(total),
+            as_of=as_of,
+        )
+
+    # ------------------------------------------------------------------ M3: evals
+
+    async def create_eval_run(self, run: EvalRunIn) -> EvalRun:
+        """Store an eval run under a new server-generated id (16 hex characters)."""
+        (run_id,) = await self.insert_eval_runs([run])
+        return EvalRun(id=run_id, **run.model_dump())
+
+    async def insert_eval_runs(
+        self, runs: Sequence[EvalRunIn], *, sample: bool = False
+    ) -> list[str]:
+        """Store eval runs; returns their ids. Sample runs get ids derived from their suite and
+        start time (stable demo links); others random ones."""
+        ids: list[str] = []
+        records: list[tuple[Any, ...]] = []
+        for run in runs:
+            run_id = _sample_run_id(run) if sample else secrets.token_hex(8)
+            ids.append(run_id)
+            passed = sum(1 for c in run.cases if c.passed)
+            regressions = sum(1 for c in run.cases if not c.passed and c.baseline_passed)
+            records.append(
+                (
+                    run_id,
+                    run.suite,
+                    run.status,
+                    run.started_at,
+                    run.duration_ms,
+                    run.model,
+                    run.git_sha,
+                    run.git_ref,
+                    run.ci_url,
+                    run.cost_usd,
+                    run.baseline_cost_usd,
+                    passed,
+                    len(run.cases) - passed,
+                    regressions,
+                    [c.model_dump(mode="json") for c in run.cases],
+                    sample,
+                )
+            )
+        if records:
+            async with self._pool.acquire() as conn:
+                await conn.executemany(
+                    f"INSERT INTO eval_runs ({', '.join(_EVAL_COLUMNS)})"  # noqa: S608
+                    f" VALUES ({', '.join(f'${i + 1}' for i in range(len(_EVAL_COLUMNS)))})"
+                    " ON CONFLICT (id) DO NOTHING",
+                    records,
+                )
+        return ids
+
+    async def has_eval_runs(self) -> bool:
+        async with self._pool.acquire() as conn:
+            return bool(await conn.fetchval("SELECT EXISTS (SELECT 1 FROM eval_runs)"))
+
+    async def is_sample_only(self) -> bool:
+        """The startup sample was seeded and nothing real has been stored since (D11)."""
+        async with self._pool.acquire() as conn:
+            flags = {r["key"] for r in await conn.fetch("SELECT key FROM lucentpad_meta")}
+        return META_SAMPLE_SEEDED in flags and META_REAL_DATA not in flags
+
+    async def list_eval_runs(
+        self, *, suite: str | None, limit: int, cursor: str | None, hide_sample: bool = False
+    ) -> EvalRunList:
+        """Eval runs (optionally of one suite), newest first by (started_at, id), with their
+        passed / failed / regression counts. Raises ``InvalidCursorError`` for a cursor from
+        another suite filter."""
+        fingerprint = (suite or "") + ("|hide_sample" if hide_sample else "")
+        after = EvalCursor.decode(cursor) if cursor is not None else None
+        if after is not None and after.fingerprint != fingerprint:
+            raise InvalidCursorError("cursor was issued for another suite")
+        args: list[Any] = []
+        where: list[str] = ["NOT sample"] if hide_sample else []
+        if suite is not None:
+            args.append(suite)
+            where.append(f"suite = ${len(args)}")
+        if after is not None:
+            args += [after.started_at, after.run_id]
+            where.append(f"(started_at, id) < (${len(args) - 1}::timestamptz, ${len(args)})")
+        args.append(limit + 1)
+        sql = (
+            "SELECT id, suite, status, started_at, passed, failed, regressions, cost_usd,"  # noqa: S608
+            f" baseline_cost_usd, git_sha, git_ref, ci_url FROM eval_runs{_where(where)}"
+            f" ORDER BY started_at DESC, id DESC LIMIT ${len(args)}"
+        )
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = EvalCursor(last["started_at"], last["id"], fingerprint).encode()
+        return EvalRunList(
+            runs=[EvalRunSummary.model_validate(dict(r)) for r in rows[:limit]],
+            next_cursor=next_cursor,
+        )
+
+    async def get_eval_run(self, run_id: str) -> EvalRun | None:
+        """One eval run with its case results, or None if unknown."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT id, {', '.join(_EVAL_IN_COLUMNS)} FROM eval_runs WHERE id = $1",  # noqa: S608
+                run_id,
+            )
+        if row is None:
+            return None
+        return EvalRun.model_validate(dict(row))

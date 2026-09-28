@@ -13,15 +13,14 @@ interface NavItem {
   to: string;
   label: string;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
-  milestone?: string;
 }
 
 const NAV: NavItem[] = [
   { to: "/traces", label: "Traces", Icon: TracesIcon },
-  { to: "/costs", label: "Costs", Icon: CostsIcon, milestone: "M3" },
+  { to: "/costs", label: "Costs", Icon: CostsIcon },
   { to: "/gateway", label: "Gateway", Icon: GatewayIcon },
-  { to: "/guardrails", label: "Guardrails", Icon: GuardrailsIcon, milestone: "M3" },
-  { to: "/evals", label: "Evals", Icon: EvalsIcon, milestone: "M3" },
+  { to: "/guardrails", label: "Guardrails", Icon: GuardrailsIcon },
+  { to: "/evals", label: "Evals", Icon: EvalsIcon },
 ];
 
 function ApiStatus() {
@@ -92,11 +91,10 @@ export function Layout() {
           </Link>
         )}
         <nav aria-label="Main" className={styles.nav}>
-          {NAV.map(({ to, label, Icon, milestone }) => (
+          {NAV.map(({ to, label, Icon }) => (
             <NavLink key={to} to={to} className={styles.navItem}>
               <Icon className={styles.navIcon} />
               <span className={styles.navLabel}>{label}</span>
-              {milestone && <span className={styles.milestone}>{milestone}</span>}
             </NavLink>
           ))}
         </nav>

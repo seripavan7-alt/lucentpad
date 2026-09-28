@@ -1,8 +1,10 @@
-"""Shared fixtures for SDK tests: a mocked ingest endpoint and mocked provider HTTP.
+"""Shared fixtures for SDK tests: a mocked LucentPad API and mocked provider HTTP.
 
 No network, no real keys: providers are ``httpx2.MockTransport`` (the transport stack anthropic
-and openai are built on); the ingest endpoint is an ``httpx.MockTransport`` on the exporter.
-Every span the SDK exports is validated against ``lucentpad_server.schema`` (the contract).
+and openai are built on); the API (``POST /v1/spans``, ``GET /v1/guardrails/rules``,
+``GET /v1/pricing``) is an ``httpx.MockTransport`` on the exporter's client, which the SDK also
+uses for its background rules/prices fetch. Every span the SDK exports is validated against
+``lucentpad_server.schema`` (the contract).
 """
 
 from __future__ import annotations
@@ -22,9 +24,34 @@ from pydantic import ValidationError
 import lucentpad
 from lucentpad import _core
 from lucentpad._exporter import Exporter
-from lucentpad_server.schema import SpanBatch
+from lucentpad_server.pricing import PRICES, PRICES_CHECKED
+from lucentpad_server.schema import GuardrailRules, ModelPrice, PriceTable, SpanBatch
 
 FAKE_KEY = "sk-test-not-a-real-key"
+
+
+def server_price_table() -> dict[str, Any]:
+    """The same body the real ``GET /v1/pricing`` serves."""
+    return PriceTable(
+        prices=[
+            ModelPrice(
+                model=name,
+                input=p.input_per_mtok,
+                output=p.output_per_mtok,
+                cache_read=p.cache_read_per_mtok,
+                cache_write=p.cache_write_per_mtok,
+            )
+            for name, p in sorted(PRICES.items())
+        ],
+        checked=PRICES_CHECKED,
+    ).model_dump(mode="json")
+
+
+def rules_doc(*rules: dict[str, Any], version: str = "v1") -> dict[str, Any]:
+    """A ``GET /v1/guardrails/rules`` body, validated against the contract."""
+    return GuardrailRules.model_validate(
+        {"rules": list(rules), "source": "test", "version": version}
+    ).model_dump(mode="json")
 
 
 @dataclass
@@ -37,8 +64,17 @@ class Ingest:
     status: int = 202
     headers: dict[str, str] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # GET side of the fake API: rules (None -> 501, like a server without rules) and pricing.
+    rules: dict[str, Any] | None = None
+    pricing: dict[str, Any] | None = field(default_factory=server_price_table)
+    api_status: int | None = None  # force this status on every GET
+    api_down: bool = False  # GETs raise ConnectError
+    api_delay: float = 0.0
+    api_requests: list[httpx.Request] = field(default_factory=list)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return self.api(request)
         with self.lock:
             self.requests.append(request)
             status = self.status
@@ -52,6 +88,32 @@ class Ingest:
         with self.lock:
             self.spans.extend(body["spans"])
         return httpx.Response(202, json={"accepted": len(body["spans"])})
+
+    def api(self, request: httpx.Request) -> httpx.Response:
+        with self.lock:
+            self.api_requests.append(request)
+            status, down, delay = self.api_status, self.api_down, self.api_delay
+            rules, pricing = self.rules, self.pricing
+        if delay:
+            time.sleep(delay)
+        if down:
+            raise httpx.ConnectError("refused", request=request)
+        if status is not None:
+            return httpx.Response(status, json={"detail": "forced"})
+        path = request.url.path
+        if path == "/v1/guardrails/rules":
+            if rules is None:
+                return httpx.Response(501, json={"detail": "guardrails not loaded"})
+            return httpx.Response(200, json=rules)
+        if path == "/v1/pricing":
+            if pricing is None:
+                return httpx.Response(501, json={"detail": "nope"})
+            return httpx.Response(200, json=pricing)
+        return httpx.Response(404, json={"detail": "not found"})
+
+    def api_paths(self) -> list[str]:
+        with self.lock:
+            return [r.url.path for r in self.api_requests]
 
     def wait_for(self, n: int, timeout: float = 3.0) -> list[dict[str, Any]]:
         deadline = time.monotonic() + timeout
@@ -77,6 +139,10 @@ def start_sdk(
     *,
     capture_content: bool = True,
     service_name: str | None = "test-svc",
+    rules: Any = None,
+    default_budget_usd: float | None = None,
+    refresh_interval: float = 60.0,
+    wait_config: bool = False,
     **exporter_kwargs: Any,
 ) -> Exporter:
     exporter_kwargs.setdefault("interval", 0.01)
@@ -88,9 +154,24 @@ def start_sdk(
         service_name=service_name,
         capture_content=capture_content,
         enabled=True,
+        rules=rules,
+        default_budget_usd=default_budget_usd,
         exporter=exporter,
+        refresh_interval=refresh_interval,
     )
+    if wait_config:
+        wait_config_fetched()
     return exporter
+
+
+def wait_config_fetched(rounds: int = 1, timeout: float = 3.0) -> None:
+    """Wait until the SDK's background rules/prices fetch has completed ``rounds`` rounds."""
+    remote = _core.current_remote()
+    assert remote is not None
+    deadline = time.monotonic() + timeout
+    while remote.fetches < rounds:
+        assert time.monotonic() < deadline, "config fetch did not finish"
+        time.sleep(0.005)
 
 
 @pytest.fixture

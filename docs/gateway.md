@@ -77,6 +77,15 @@ more on a smaller model from the same provider (`claude-sonnet-5` → `claude-ha
 Streamed requests (almost all of Claude Code's) are never retried: part of the answer may already have
 reached you. Turn failover off with `LUCENTPAD_GATEWAY_FAILOVER=0`.
 
+## Guardrails and budgets
+
+Prompt rules from the server's rules file (see the getting-started guide) are checked on the last
+user message before anything is sent: a match returns a 400 in the provider's own error format,
+which Claude Code or Copilot shows as an API error, and the block is recorded in the session. Keys,
+emails and card numbers are redacted from what LucentPad stores. Set
+`LUCENTPAD_GATEWAY_SESSION_BUDGET_USD` to get an alert on the turn that takes a session over it;
+the gateway never stops a session for budget.
+
 ## Troubleshooting
 
 - **Nothing shows up.** Check the variable is set in the shell that started the tool (`echo

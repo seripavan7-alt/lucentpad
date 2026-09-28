@@ -1,0 +1,33 @@
+{
+  "_about": "Written by `lucentpad eval --update-baseline`. See evals/README.md.",
+  "suite": "support_agent",
+  "model": "claude-haiku-4-5",
+  "mock": true,
+  "total_cost_usd": 0.010406,
+  "cases": {
+    "order_status": {
+      "passed": true,
+      "cost_usd": 0.001306
+    },
+    "refund_under_limit": {
+      "passed": true,
+      "cost_usd": 0.002942
+    },
+    "refund_over_limit_blocked": {
+      "passed": true,
+      "cost_usd": 0.00189
+    },
+    "unknown_order": {
+      "passed": true,
+      "cost_usd": 0.001246
+    },
+    "reschedule_delivery": {
+      "passed": true,
+      "cost_usd": 0.002499
+    },
+    "small_talk_no_tool": {
+      "passed": true,
+      "cost_usd": 0.000523
+    }
+  }
+}

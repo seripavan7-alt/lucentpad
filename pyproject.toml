@@ -25,6 +25,7 @@ dev = [
   "httpx2>=2.13.1",  # provider mocks in SDK tests (anthropic/openai use httpx2)
   "testcontainers[postgres]>=4.8",
   "asyncpg-stubs>=0.29",
+  "types-PyYAML>=6",
 ]
 
 [tool.ruff]

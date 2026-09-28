@@ -79,6 +79,8 @@ async def test_migrations_idempotent(db_url: str) -> None:
             )
         assert [r["version"] for r in versions] == first
         assert [r["tablename"] for r in tables] == [
+            "eval_runs",
+            "guardrail_events",
             "lucentpad_meta",
             "schema_migrations",
             "spans",

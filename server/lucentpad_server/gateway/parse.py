@@ -430,3 +430,29 @@ def parse_request(provider: str, body: bytes, *, previews: bool = True) -> tuple
             else openai_input_preview(messages)
         )
     return data, info
+
+
+def _text_parts(content: Any) -> str:
+    """Only what the user typed: string content and ``text`` blocks (no tool results)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            b if isinstance(b, str) else str(_get(b, "text", ""))
+            for b in content
+            if isinstance(b, str) or _get(b, "type") == "text"
+        ]
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def last_user_text(data: Any) -> str | None:
+    """The text of the request's last ``user`` message (Anthropic and OpenAI shapes alike),
+    for prompt rules. Tool results are left out; None when there is no user message."""
+    messages = _get(data, "messages")
+    if not isinstance(messages, list):
+        return None
+    for m in reversed(messages):
+        if _get(m, "role") == "user":
+            return _text_parts(_get(m, "content"))
+    return None

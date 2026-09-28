@@ -53,6 +53,13 @@ def test_openapi_without_database() -> None:
     assert set(schema["paths"]) == {
         "/healthz",
         "/v1/data",
+        "/v1/pricing",
+        "/v1/costs",
+        "/v1/guardrails/rules",
+        "/v1/guardrails/events",
+        "/v1/guardrails/summary",
+        "/v1/evals/runs",
+        "/v1/evals/runs/{run_id}",
         "/v1/spans",
         "/v1/ingest/stats",
         "/v1/traces",

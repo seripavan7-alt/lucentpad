@@ -12,6 +12,12 @@ client still gets exactly the upstream's bytes. (If an upstream compresses anywa
 and ``content-encoding`` are relayed untouched; gzip/deflate are inflated on the side copy only.)
 Credentials (``x-api-key``, ``authorization``, cookies) are forwarded but never logged, stored,
 or put on spans; only ``Attr.KEY_FINGERPRINT`` (salted SHA-256, 12 hex) is kept.
+
+Guardrails (M3): prompt rules (from ``app.state.guardrails``) are checked on the last user message
+of a chat request before it is forwarded; a match answers a provider-shaped 400 without calling
+the upstream and records a ``kind=guardrail`` span. Recorded spans are redacted (D20; requests to
+the provider are never altered). With ``session_budget_usd`` set, the turn whose estimated cost
+takes its session past the budget gets a ``lucentpad.budget.alert`` event (alert only).
 """
 
 from __future__ import annotations
@@ -31,17 +37,24 @@ from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
+from lucentpad.guardrails import Block, Rule, check_prompt
 from lucentpad_server.gateway.clients import detect_client, key_fingerprint
 from lucentpad_server.gateway.config import GatewayConfig
-from lucentpad_server.gateway.parse import StreamParser
-from lucentpad_server.gateway.sessions import SessionTracker
+from lucentpad_server.gateway.parse import StreamParser, last_user_text
+from lucentpad_server.gateway.sessions import Session, SessionTracker
 from lucentpad_server.gateway.spans import (
     CallRecord,
     FailoverNote,
+    guardrail_span,
     llm_span,
     root_span,
+    turn_cost,
     utcnow,
+    with_budget_alert,
 )
+from lucentpad_server.guardrails import GuardrailProvider
+from lucentpad_server.guardrails.redaction import redact_span
+from lucentpad_server.guardrails.rules import to_engine
 from lucentpad_server.ingest import IngestPipeline
 from lucentpad_server.schema import GatewayProvider, Span
 
@@ -94,6 +107,21 @@ def error_body(provider: str, kind: str, message: str) -> bytes:
         payload: dict[str, Any] = {"type": "error", "error": {"type": kind, "message": message}}
     else:
         payload = {"error": {"message": message, "type": kind, "param": None, "code": None}}
+    return json.dumps(payload).encode()
+
+
+def blocked_body(provider: str, rule: str, message: str) -> bytes:
+    """The 400 body for a request a guardrail blocked, in the provider's error shape."""
+    text = f"Blocked by LucentPad guardrail {rule}: {message}"
+    if provider == "anthropic":
+        payload: dict[str, Any] = {
+            "type": "error",
+            "error": {"type": "invalid_request_error", "message": text},
+        }
+    else:
+        payload = {
+            "error": {"message": text, "type": "invalid_request_error", "code": "guardrail_blocked"}
+        }
     return json.dumps(payload).encode()
 
 
@@ -225,6 +253,10 @@ class HttpGatewayProxy:
         self._tasks: set[asyncio.Task[None]] = set()
         self.dropped_spans = 0
         """Spans the ingest queue refused (full) or that failed to build."""
+        self.blocked_requests = 0
+        self._rules_version: str | None = None
+        self._prompt_rules: list[Rule] = []
+        self._rule_messages: dict[str, str] = {}
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -260,12 +292,108 @@ class HttpGatewayProxy:
 
     async def _record(self, call: CallRecord) -> None:
         try:
-            span = await asyncio.to_thread(llm_span, call)
+            span = await asyncio.to_thread(lambda: redact_span(llm_span(call)))
         except Exception:
             self.dropped_spans += 1
             log.exception("gateway: could not build the span for a %s call", call.provider)
             return
-        self._offer([span])
+        # Back on the event loop: session spend is only ever touched here (no races).
+        self._offer([self._budget(call.session, span)])
+
+    def _budget(self, session: Session, span: Span) -> Span:
+        """Add the turn's estimated cost to its session; the turn that takes the session past
+        ``session_budget_usd`` gets a budget alert event (once per session; never blocks)."""
+        limit = self.config.session_budget_usd
+        if limit is None:
+            return span
+        cost = turn_cost(span)
+        if not cost:
+            return span
+        session.spent_usd += cost
+        if session.budget_alerted or session.spent_usd <= limit:
+            return span
+        session.budget_alerted = True
+        log.info("gateway: session %s crossed its $%s budget", session.session_id, limit)
+        return with_budget_alert(span, limit, session.spent_usd)
+
+    # ------------------------------------------------------------------ guardrails
+
+    def _rules(self, provider: GuardrailProvider | None) -> list[Rule]:
+        """The active prompt rules, rebuilt for the engine only when their version changes."""
+        if provider is None:
+            return []
+        try:
+            current = provider.rules()
+            if current.version != self._rules_version:
+                prompt = [r for r in current.rules if r.type == "prompt"]
+                self._prompt_rules = to_engine(prompt)
+                self._rule_messages = {r.id: r.message for r in prompt}
+                self._rules_version = current.version
+        except Exception:
+            log.exception("gateway: could not load guardrail rules; prompt rules skipped")
+            return []
+        return self._prompt_rules
+
+    def _check_prompt(self, rules: list[Rule], body: bytes) -> tuple[Block, str, Any] | None:
+        """The block (with the matched user text and the parsed body) for a request a prompt
+        rule matches, else None. Never raises: an engine failure lets the request through."""
+        try:
+            data = json.loads(body) if body else None
+            text = last_user_text(data)
+            if not text:
+                return None
+            block = check_prompt(rules, text)
+        except Exception:
+            log.exception("gateway: prompt rule check failed; request forwarded")
+            return None
+        return (block, text, data) if block is not None else None
+
+    def _blocked(
+        self,
+        provider: GatewayProvider,
+        call: CallRecord,
+        block: Block,
+        text: str,
+        data: Any,
+    ) -> Response:
+        self.blocked_requests += 1
+        message = self._rule_messages.get(block.rule) or block.reason
+        model = data.get("model") if isinstance(data, dict) else None
+        duration_ms = (time.perf_counter() - call.t0) * 1000
+
+        def build() -> Span:
+            return redact_span(
+                guardrail_span(
+                    session=call.session,
+                    provider=provider,
+                    fingerprint=call.fingerprint,
+                    start=call.start,
+                    duration_ms=duration_ms,
+                    request_model=model if isinstance(model, str) else None,
+                    rule=block.rule,
+                    reason=block.reason or message,
+                    prompt=text if call.capture else None,
+                )
+            )
+
+        async def record() -> None:
+            try:
+                span = await asyncio.to_thread(build)
+            except Exception:
+                self.dropped_spans += 1
+                log.exception("gateway: could not build the guardrail span")
+                return
+            self._offer([span])
+
+        task = asyncio.get_running_loop().create_task(record())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        log.info("gateway: %s request blocked by guardrail %s", provider, block.rule)
+        return Response(
+            blocked_body(provider, block.rule, message),
+            status_code=400,
+            media_type="application/json",
+        )
 
     # ------------------------------------------------------------------ forwarding
 
@@ -313,6 +441,11 @@ class HttpGatewayProxy:
                 request_body=body,
                 capture=self.config.capture_content,
             )
+            rules = self._rules(getattr(request.app.state, "guardrails", None))
+            if rules:
+                hit = self._check_prompt(rules, body)
+                if hit is not None:
+                    return self._blocked(provider, call, *hit)
 
         try:
             resp = await client.send(

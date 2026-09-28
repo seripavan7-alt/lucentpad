@@ -19,6 +19,23 @@ export type GatewayTurnList = Schemas["GatewayTurnList"];
 export type GatewayClientTotals = Schemas["GatewayClientTotals"];
 export type GatewaySummary = Schemas["GatewaySummary"];
 export type GatewayProvider = NonNullable<GatewayTurn["provider"]>;
+export type CostPoint = Schemas["CostPoint"];
+export type CostSeries = Schemas["CostSeries"];
+export type CostGroup = CostSeries["group_by"];
+export type ModelPrice = Schemas["ModelPrice"];
+export type PriceTable = Schemas["PriceTable"];
+export type GuardrailRule = Schemas["GuardrailRule"];
+export type GuardrailRules = Schemas["GuardrailRules"];
+export type GuardrailEvent = Schemas["GuardrailEvent"];
+export type GuardrailEventKind = GuardrailEvent["kind"];
+export type GuardrailEventList = Schemas["GuardrailEventList"];
+export type GuardrailSummary = Schemas["GuardrailSummary"];
+export type EvalRun = Schemas["EvalRun"];
+export type EvalRunSummary = Schemas["EvalRunSummary"];
+export type EvalRunList = Schemas["EvalRunList"];
+export type EvalStatus = EvalRun["status"];
+export type EvalCaseResult = Schemas["EvalCaseResult"];
+export type EvalCheckResult = Schemas["EvalCheckResult"];
 
 export type ListTracesParams = NonNullable<
   operations["list_traces_v1_traces_get"]["parameters"]["query"]
@@ -34,6 +51,16 @@ export type GatewayTurnsParams = NonNullable<
 >;
 export type GatewaySummaryParams = NonNullable<
   operations["gateway_summary_v1_gateway_summary_get"]["parameters"]["query"]
+>;
+export type CostsParams = NonNullable<operations["costs_v1_costs_get"]["parameters"]["query"]>;
+export type GuardrailEventsParams = NonNullable<
+  operations["guardrail_events_v1_guardrails_events_get"]["parameters"]["query"]
+>;
+export type GuardrailSummaryParams = NonNullable<
+  operations["guardrail_summary_v1_guardrails_summary_get"]["parameters"]["query"]
+>;
+export type EvalRunsParams = NonNullable<
+  operations["list_eval_runs_v1_evals_runs_get"]["parameters"]["query"]
 >;
 export type TraceOrder = NonNullable<ListTracesParams["order"]>;
 export type TraceSort = NonNullable<ListTracesParams["sort"]>;
@@ -103,7 +130,30 @@ export const Attr = {
   GATEWAY_UPSTREAM: "lucentpad.gateway.upstream",
   TTFB_MS: "lucentpad.ttfb_ms",
   KEY_FINGERPRINT: "lucentpad.key_fingerprint",
+  // Guardrails, budgets, evals (M3)
+  GUARDRAIL_REASON: "lucentpad.guardrail.reason",
+  BUDGET_SCOPE: "lucentpad.budget.scope",
+  EVAL_RUN_ID: "lucentpad.eval.run_id",
+  EVAL_CASE: "lucentpad.eval.case",
 } as const;
+
+/** Cost series groupings; mirrors `CostGroup` in schema.py. */
+export const COST_GROUPS = ["model", "client", "service"] as const satisfies readonly CostGroup[];
+
+/** Guardrail event kinds; mirrors `GuardrailEventKind` in schema.py. */
+export const GUARDRAIL_EVENT_KINDS = [
+  "block",
+  "redaction",
+  "budget",
+] as const satisfies readonly GuardrailEventKind[];
+
+/** Eval run statuses; mirrors `EvalStatus` in schema.py. */
+export const EVAL_STATUSES = [
+  "passed",
+  "failed",
+  "regressed",
+  "error",
+] as const satisfies readonly EvalStatus[];
 
 /** The clients the gateway recognises (`GatewayTurn.client`), in display order. */
 export const GATEWAY_CLIENTS = ["claude-code", "copilot-chat", "copilot-cli", "other"] as const;

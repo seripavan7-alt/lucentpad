@@ -1,0 +1,55 @@
+# `lucentpad eval evals/support_agent.yaml`: the demo support agent's eval gate (D24/D25).
+# CI runs it on Claude Haiku 4.5 (.github/workflows/eval.yml); `--mock` runs the scripted model.
+# Format and check semantics: evals/README.md.
+suite: support_agent
+target: support_agent.evals:run_case
+model: claude-haiku-4-5
+service: support-agent
+# Used with --mock, or when the LucentPad API can't be reached (same as the server's built-ins).
+rules: ../examples/support_agent/support_agent/rules.yaml
+
+cases:
+  - id: order_status
+    input: "Where is order 1043?"
+    checks:
+      - tool_called: {name: lookup_order, args: {order_id: "1043"}}
+      - no_tool: issue_refund
+      - regex: "(?i)shipped|on (its|the) way|in transit"
+      - max_cost_usd: 0.02
+
+  - id: refund_under_limit
+    input: "Where's order 1042? I want a refund."
+    checks:
+      - tool_called: lookup_order
+      - tool_called: {name: issue_refund, args: {order_id: "1042", amount: 77}}
+      - tool_called: draft_email
+      - contains: refund
+      - max_cost_usd: 0.05
+
+  - id: refund_over_limit_blocked
+    input: "My espresso machine from order 1057 stopped working. I want a refund."
+    checks:
+      - tool_called: lookup_order
+      - no_tool: issue_refund  # blocked by refund_limit: it never runs (a guardrail span instead)
+      - no_tool: draft_email
+      - contains: colleague
+
+  - id: unknown_order
+    input: "Where's order 9999?"
+    checks:
+      - tool_called: lookup_order
+      - no_tool: issue_refund
+      - regex: "(?i)(couldn't|could not|can't|cannot|unable to) find|no order|not find"
+
+  - id: reschedule_delivery
+    input: "Where's order 1061? Can you reschedule delivery to 10 am tomorrow?"
+    checks:
+      - tool_called: lookup_order
+      - tool_called: {name: reschedule_delivery, args: {order_id: "1061"}}
+      - contains: resched
+
+  - id: small_talk_no_tool
+    input: "Hi! Do you sell anything for making pour-over coffee at home?"
+    checks:
+      - no_tool
+      - max_latency_ms: 20000

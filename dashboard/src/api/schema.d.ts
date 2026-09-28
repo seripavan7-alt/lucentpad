@@ -69,6 +69,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Costs
+         * @description Spend over time, grouped by model, client or service.
+         */
+        get: operations["costs_v1_costs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/data": {
         parameters: {
             query?: never;
@@ -81,6 +101,47 @@ export interface paths {
          * @description Whether the database holds the startup sample data, real data, or both.
          */
         get: operations["data_info_v1_data_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/evals/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Runs
+         * @description Eval runs, newest first.
+         */
+        get: operations["list_eval_runs_v1_evals_runs_get"];
+        put?: never;
+        /**
+         * Create Eval Run
+         * @description Record an eval run (posted by `lucentpad eval`).
+         */
+        post: operations["create_eval_run_v1_evals_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/evals/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Eval Run */
+        get: operations["get_eval_run_v1_evals_runs__run_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -129,6 +190,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/guardrails/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Guardrail Events
+         * @description Blocks, redactions and budget alerts, newest first.
+         */
+        get: operations["guardrail_events_v1_guardrails_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/guardrails/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Guardrail Rules
+         * @description The active blocking rules. The SDK and gateway fetch these and refresh them.
+         */
+        get: operations["guardrail_rules_v1_guardrails_rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/guardrails/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Guardrail Summary
+         * @description Blocks per rule and redactions per kind in the window.
+         */
+        get: operations["guardrail_summary_v1_guardrails_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ingest/stats": {
         parameters: {
             query?: never;
@@ -138,6 +259,27 @@ export interface paths {
         };
         /** Ingest Stats */
         get: operations["ingest_stats_v1_ingest_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Price Table
+         * @description The price table that prices every stored span (USD per million tokens). The SDK and
+         *     gateway use it to estimate spend for budgets.
+         */
+        get: operations["price_table_v1_pricing_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -221,6 +363,51 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CostPoint */
+        CostPoint: {
+            /**
+             * Bucket
+             * Format: date-time
+             * @description Start of the time bucket.
+             */
+            bucket: string;
+            /** Calls */
+            calls: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /**
+             * Group
+             * @description Model, client or service name (`other` when unknown).
+             */
+            group: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
+         * CostSeries
+         * @description Spend over time, one point per (bucket, group) with any cost. Buckets are aligned to
+         *     ``bucket_seconds`` (chosen from the window: 5 min up to 1 day).
+         */
+        CostSeries: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Bucket Seconds */
+            bucket_seconds: number;
+            /**
+             * Group By
+             * @enum {string}
+             */
+            group_by: "model" | "client" | "service";
+            /** Points */
+            points: components["schemas"]["CostPoint"][];
+            /** Total Cost Usd */
+            total_cost_usd: number;
+        };
         /**
          * DataInfo
          * @description What the database holds: the startup sample, real recorded data, or both.
@@ -235,6 +422,150 @@ export interface components {
         ErrorResponse: {
             /** Detail */
             detail: string;
+        };
+        /** EvalCaseResult */
+        EvalCaseResult: {
+            /**
+             * Baseline Passed
+             * @description null when the case is new.
+             */
+            baseline_passed: boolean | null;
+            /** Case */
+            case: string;
+            /** Checks */
+            checks: components["schemas"]["EvalCheckResult"][];
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Latency Ms */
+            latency_ms: number | null;
+            /** Output Preview */
+            output_preview: string | null;
+            /** Passed */
+            passed: boolean;
+            /** Trace Id */
+            trace_id: string | null;
+        };
+        /** EvalCheckResult */
+        EvalCheckResult: {
+            /**
+             * Check
+             * @description e.g. `contains: refund`, `tool_called: lookup_order`.
+             */
+            check: string;
+            /** Detail */
+            detail?: string | null;
+            /** Passed */
+            passed: boolean;
+        };
+        /** EvalRun */
+        EvalRun: {
+            /** Baseline Cost Usd */
+            baseline_cost_usd: number | null;
+            /** Cases */
+            cases: components["schemas"]["EvalCaseResult"][];
+            /** Ci Url */
+            ci_url?: string | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Git Ref */
+            git_ref?: string | null;
+            /** Git Sha */
+            git_sha?: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "regressed" | "error";
+            /** Suite */
+            suite: string;
+        };
+        /**
+         * EvalRunIn
+         * @description Body of ``POST /v1/evals/runs`` (sent by ``lucentpad eval``).
+         */
+        EvalRunIn: {
+            /** Baseline Cost Usd */
+            baseline_cost_usd: number | null;
+            /** Cases */
+            cases: components["schemas"]["EvalCaseResult"][];
+            /** Ci Url */
+            ci_url?: string | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Git Ref */
+            git_ref?: string | null;
+            /** Git Sha */
+            git_sha?: string | null;
+            /** Model */
+            model: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "regressed" | "error";
+            /** Suite */
+            suite: string;
+        };
+        /** EvalRunList */
+        EvalRunList: {
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Runs
+             * @description Newest first.
+             */
+            runs: components["schemas"]["EvalRunSummary"][];
+        };
+        /** EvalRunSummary */
+        EvalRunSummary: {
+            /** Baseline Cost Usd */
+            baseline_cost_usd?: number | null;
+            /** Ci Url */
+            ci_url: string | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Failed */
+            failed: number;
+            /** Git Ref */
+            git_ref: string | null;
+            /** Git Sha */
+            git_sha: string | null;
+            /** Id */
+            id: string;
+            /** Passed */
+            passed: number;
+            /** Regressions */
+            regressions: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "regressed" | "error";
+            /** Suite */
+            suite: string;
         };
         /** FacetValue */
         FacetValue: {
@@ -340,6 +671,168 @@ export interface components {
              */
             turns: components["schemas"]["GatewayTurn"][];
         };
+        /**
+         * GuardrailEvent
+         * @description A block (a ``kind=guardrail`` span), a redaction (a ``lucentpad.redaction`` event) or a
+         *     budget alert (a ``lucentpad.budget.alert`` event).
+         */
+        GuardrailEvent: {
+            /**
+             * Budget Limit Usd
+             * @description budget alerts
+             */
+            budget_limit_usd?: number | null;
+            /**
+             * Budget Scope
+             * @description budget alerts: run | session
+             */
+            budget_scope?: string | null;
+            /**
+             * Budget Spent Usd
+             * @description budget alerts
+             */
+            budget_spent_usd?: number | null;
+            /** Client */
+            client: string | null;
+            /**
+             * Count
+             * @description redactions: how many values; blocks and budget alerts: 1
+             */
+            count: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "block" | "redaction" | "budget";
+            /**
+             * Reason
+             * @description blocks: why
+             */
+            reason: string | null;
+            /**
+             * Redaction Kind
+             * @description redactions: email, api_key, card, ...
+             */
+            redaction_kind: string | null;
+            /**
+             * Rule
+             * @description blocks: the rule id
+             */
+            rule: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "sdk" | "gateway";
+            /** Span Id */
+            span_id: string;
+            /**
+             * Time
+             * Format: date-time
+             */
+            time: string;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** GuardrailEventList */
+        GuardrailEventList: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /**
+             * Events
+             * @description Newest first.
+             */
+            events: components["schemas"]["GuardrailEvent"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /**
+         * GuardrailRule
+         * @description A blocking rule. ``prompt`` rules match the user's message (any keyword, case-insensitive,
+         *     or the regex); ``tool`` rules match a tool call by name and a condition on its arguments,
+         *     e.g. ``amount > 200`` (comparisons on argument fields; no code is evaluated).
+         */
+        GuardrailRule: {
+            /**
+             * Condition
+             * @description tool rules, e.g. `amount > 200`
+             */
+            condition?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Keywords
+             * @description prompt rules
+             */
+            keywords?: string[];
+            /**
+             * Message
+             * @description Shown to the caller when the rule blocks.
+             */
+            message: string;
+            /**
+             * Pattern
+             * @description prompt rules: a regex
+             */
+            pattern?: string | null;
+            /**
+             * Tool
+             * @description tool rules: the tool name
+             */
+            tool?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "prompt" | "tool";
+        };
+        /** GuardrailRuleCount */
+        GuardrailRuleCount: {
+            /** Blocks */
+            blocks: number;
+            /** Rule */
+            rule: string;
+        };
+        /** GuardrailRules */
+        GuardrailRules: {
+            /** Rules */
+            rules: components["schemas"]["GuardrailRule"][];
+            /**
+             * Source
+             * @description Where the rules came from: a file path or `built-in`.
+             */
+            source: string;
+            /**
+             * Version
+             * @description Changes whenever the rules change (for client caches).
+             */
+            version: string;
+        };
+        /**
+         * GuardrailSummary
+         * @description Counts for a window: blocks per rule, redactions per kind.
+         */
+        GuardrailSummary: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Blocks */
+            blocks: components["schemas"]["GuardrailRuleCount"][];
+            /**
+             * Budget Alerts
+             * @default 0
+             */
+            budget_alerts: number;
+            /** Redactions */
+            redactions: components["schemas"]["FacetValue"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -379,6 +872,32 @@ export interface components {
             write_errors_total: number;
             /** Written Total */
             written_total: number;
+        };
+        /**
+         * ModelPrice
+         * @description USD per million tokens.
+         */
+        ModelPrice: {
+            /** Cache Read */
+            cache_read: number;
+            /** Cache Write */
+            cache_write: number;
+            /** Input */
+            input: number;
+            /** Model */
+            model: string;
+            /** Output */
+            output: number;
+        };
+        /** PriceTable */
+        PriceTable: {
+            /**
+             * Checked
+             * @description When the list prices were last checked (ISO date).
+             */
+            checked: string;
+            /** Prices */
+            prices: components["schemas"]["ModelPrice"][];
         };
         /** Span */
         Span: {
@@ -720,6 +1239,49 @@ export interface operations {
             };
         };
     };
+    costs_v1_costs_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                group_by?: "model" | "client" | "service";
+                hide_sample?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     data_info_v1_data_get: {
         parameters: {
             query?: never;
@@ -736,6 +1298,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataInfo"];
+                };
+            };
+        };
+    };
+    list_eval_runs_v1_evals_runs_get: {
+        parameters: {
+            query?: {
+                suite?: string | null;
+                limit?: number;
+                cursor?: string | null;
+                hide_sample?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_eval_run_v1_evals_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRun"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_eval_run_v1_evals_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRun"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -832,6 +1528,123 @@ export interface operations {
             };
         };
     };
+    guardrail_events_v1_guardrails_events_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                kind?: ("block" | "redaction" | "budget")[] | null;
+                limit?: number;
+                cursor?: string | null;
+                since?: string | null;
+                hide_sample?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailEventList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    guardrail_rules_v1_guardrails_rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailRules"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    guardrail_summary_v1_guardrails_summary_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                hide_sample?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ingest_stats_v1_ingest_stats_get: {
         parameters: {
             query?: never;
@@ -848,6 +1661,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestStats"];
+                };
+            };
+        };
+    };
+    price_table_v1_pricing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceTable"];
                 };
             };
         };

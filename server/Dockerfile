@@ -17,11 +17,13 @@ WORKDIR /src
 # Dependencies first (cached until the lockfile or a pyproject changes).
 COPY pyproject.toml uv.lock ./
 COPY server/pyproject.toml server/pyproject.toml
+COPY sdk/pyproject.toml sdk/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package lucentpad-server --no-install-workspace
 
 # Then the server package itself, installed non-editable so /src is not needed at runtime.
 COPY server/ server/
+COPY sdk/ sdk/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package lucentpad-server --no-editable
 

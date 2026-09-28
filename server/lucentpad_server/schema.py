@@ -55,6 +55,11 @@ class Attr:
     # Redaction event attributes
     REDACTION_KIND = "lucentpad.redaction.kind"
     REDACTION_COUNT = "lucentpad.redaction.count"
+    # Guardrails, budgets, evals (M3)
+    GUARDRAIL_REASON = "lucentpad.guardrail.reason"  # human-readable why, on the guardrail span
+    BUDGET_SCOPE = "lucentpad.budget.scope"  # "run" (SDK trace) | "session" (gateway)
+    EVAL_RUN_ID = "lucentpad.eval.run_id"  # on the root span of a trace produced by an eval case
+    EVAL_CASE = "lucentpad.eval.case"
     # Demo support agent
     REFUND_AMOUNT = "lucentpad.refund.amount"
     # Gateway (M2)
@@ -284,3 +289,172 @@ class GatewaySummary(_Model):
 
     clients: list[GatewayClientTotals]
     as_of: datetime
+
+
+# --------------------------------------------------------------------------- M3: guardrails
+
+GuardrailRuleType = Literal["prompt", "tool"]
+GuardrailEventKind = Literal["block", "redaction", "budget"]
+
+
+class GuardrailRule(_Model):
+    """A blocking rule. ``prompt`` rules match the user's message (any keyword, case-insensitive,
+    or the regex); ``tool`` rules match a tool call by name and a condition on its arguments,
+    e.g. ``amount > 200`` (comparisons on argument fields; no code is evaluated)."""
+
+    id: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    type: GuardrailRuleType
+    description: str | None = None
+    keywords: list[str] = Field(default_factory=list, description="prompt rules")
+    pattern: str | None = Field(default=None, description="prompt rules: a regex")
+    tool: str | None = Field(default=None, description="tool rules: the tool name")
+    condition: str | None = Field(default=None, description="tool rules, e.g. `amount > 200`")
+    message: str = Field(description="Shown to the caller when the rule blocks.")
+
+
+class GuardrailRules(_Model):
+    rules: list[GuardrailRule]
+    source: str = Field(description="Where the rules came from: a file path or `built-in`.")
+    version: str = Field(description="Changes whenever the rules change (for client caches).")
+
+
+class GuardrailEvent(_Model):
+    """A block (a ``kind=guardrail`` span), a redaction (a ``lucentpad.redaction`` event) or a
+    budget alert (a ``lucentpad.budget.alert`` event)."""
+
+    kind: GuardrailEventKind
+    time: datetime
+    trace_id: TraceId
+    span_id: SpanId
+    source: SpanSource
+    client: str | None
+    rule: str | None = Field(description="blocks: the rule id")
+    reason: str | None = Field(description="blocks: why")
+    redaction_kind: str | None = Field(description="redactions: email, api_key, card, ...")
+    count: int = Field(description="redactions: how many values; blocks and budget alerts: 1")
+    budget_limit_usd: float | None = Field(default=None, description="budget alerts")
+    budget_spent_usd: float | None = Field(default=None, description="budget alerts")
+    budget_scope: str | None = Field(default=None, description="budget alerts: run | session")
+
+
+class GuardrailEventList(_Model):
+    events: list[GuardrailEvent] = Field(description="Newest first.")
+    next_cursor: str | None
+    as_of: datetime
+
+
+class GuardrailRuleCount(_Model):
+    rule: str
+    blocks: int
+
+
+class GuardrailSummary(_Model):
+    """Counts for a window: blocks per rule, redactions per kind."""
+
+    blocks: list[GuardrailRuleCount]
+    redactions: list[FacetValue]
+    budget_alerts: int = 0
+    as_of: datetime
+
+
+# --------------------------------------------------------------------------- M3: pricing, costs
+
+
+class ModelPrice(_Model):
+    """USD per million tokens."""
+
+    model: str
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+
+
+class PriceTable(_Model):
+    prices: list[ModelPrice]
+    checked: str = Field(description="When the list prices were last checked (ISO date).")
+
+
+CostGroup = Literal["model", "client", "service"]
+
+
+class CostPoint(_Model):
+    bucket: datetime = Field(description="Start of the time bucket.")
+    group: str = Field(description="Model, client or service name (`other` when unknown).")
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+    calls: int
+
+
+class CostSeries(_Model):
+    """Spend over time, one point per (bucket, group) with any cost. Buckets are aligned to
+    ``bucket_seconds`` (chosen from the window: 5 min up to 1 day)."""
+
+    points: list[CostPoint]
+    bucket_seconds: int
+    group_by: CostGroup
+    total_cost_usd: float
+    as_of: datetime
+
+
+# --------------------------------------------------------------------------- M3: evals
+
+EvalStatus = Literal["passed", "failed", "regressed", "error"]
+
+
+class EvalCheckResult(_Model):
+    check: str = Field(description="e.g. `contains: refund`, `tool_called: lookup_order`.")
+    passed: bool
+    detail: str | None = None
+
+
+class EvalCaseResult(_Model):
+    case: str
+    passed: bool
+    baseline_passed: bool | None = Field(description="null when the case is new.")
+    checks: list[EvalCheckResult]
+    cost_usd: float | None
+    latency_ms: float | None
+    trace_id: TraceId | None
+    output_preview: str | None
+
+
+class EvalRunIn(_Model):
+    """Body of ``POST /v1/evals/runs`` (sent by ``lucentpad eval``)."""
+
+    suite: str = Field(min_length=1, max_length=200)
+    status: EvalStatus
+    started_at: datetime
+    duration_ms: float
+    model: str | None
+    git_sha: str | None = Field(default=None, max_length=64)
+    git_ref: str | None = Field(default=None, max_length=200)
+    ci_url: str | None = Field(default=None, max_length=500)
+    cost_usd: float | None
+    baseline_cost_usd: float | None
+    cases: list[EvalCaseResult] = Field(max_length=500)
+
+
+class EvalRun(EvalRunIn):
+    id: str
+
+
+class EvalRunSummary(_Model):
+    id: str
+    suite: str
+    status: EvalStatus
+    started_at: datetime
+    passed: int
+    failed: int
+    regressions: int
+    cost_usd: float | None
+    baseline_cost_usd: float | None = None
+    git_sha: str | None
+    git_ref: str | None
+    ci_url: str | None
+
+
+class EvalRunList(_Model):
+    runs: list[EvalRunSummary] = Field(description="Newest first.")
+    next_cursor: str | None

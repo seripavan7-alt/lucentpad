@@ -8,7 +8,14 @@ from types import TracebackType
 from typing import Any
 
 from ._core import active
-from ._llm import LLMCall, block_get, instrument_async_stream, instrument_stream
+from ._llm import (
+    LLMCall,
+    apreflight,
+    block_get,
+    instrument_async_stream,
+    instrument_stream,
+    preflight,
+)
 
 SYSTEM = "anthropic"
 _MARK = "_lucentpad_wrapped"
@@ -55,6 +62,31 @@ def input_preview(messages: Any) -> str | None:
         if block_get(m, "role") == "user":
             return _content_text(block_get(m, "content"), tool_names)
     return None
+
+
+def user_text(messages: Any) -> str | None:
+    """The text of the last user message (text blocks only), for prompt rules."""
+    if not isinstance(messages, list | tuple):
+        return None
+    for m in reversed(messages):
+        if block_get(m, "role") != "user":
+            continue
+        content = block_get(m, "content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, Iterable):
+            parts = [
+                b if isinstance(b, str) else str(block_get(b, "text", "") or "")
+                for b in content
+                if isinstance(b, str) or block_get(b, "type") == "text"
+            ]
+            return "\n".join(p for p in parts if p) or None
+        return None
+    return None
+
+
+def _prompt(kwargs: dict[str, Any]) -> Any:
+    return lambda: user_text(kwargs.get("messages"))
 
 
 def _record_usage(call: LLMCall, usage: Any) -> None:
@@ -141,6 +173,7 @@ def _wrap_create(original: Any) -> Any:
     def create(*args: Any, **kwargs: Any) -> Any:
         if active() is None:
             return original(*args, **kwargs)
+        preflight(_prompt(kwargs))
         streaming = kwargs.get("stream") is True
         try:
             call: LLMCall | None = _new_call(kwargs, streaming)
@@ -171,6 +204,7 @@ def _wrap_acreate(original: Any) -> Any:
     async def create(*args: Any, **kwargs: Any) -> Any:
         if active() is None:
             return await original(*args, **kwargs)
+        await apreflight(_prompt(kwargs))
         streaming = kwargs.get("stream") is True
         try:
             call: LLMCall | None = _new_call(kwargs, streaming)
@@ -263,8 +297,14 @@ class _AsyncStreamManager:
 
 
 def _wrap_stream(original: Any, manager_cls: type[_StreamManager | _AsyncStreamManager]) -> Any:
+    is_async = manager_cls is _AsyncStreamManager
+
     @functools.wraps(original)
     def stream(*args: Any, **kwargs: Any) -> Any:
+        if active() is not None:
+            # Checked here, before the SDK builds the (lazy) request; on an event loop, without
+            # the one-time wait for the first rules fetch.
+            preflight(_prompt(kwargs), wait=not is_async)
         manager = original(*args, **kwargs)
         return manager_cls(manager, dict(kwargs))
 

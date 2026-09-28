@@ -20,8 +20,18 @@ import { useNow } from "../lib/useNow";
 import { usePolling } from "../lib/usePolling";
 import { clientParams, type GatewayView } from "../features/gateway/view";
 import { isoMicros } from "../lib/time";
+import { byTimeDesc, eventKey, kindParams, type GuardrailsView } from "../features/guardrails/view";
+import type { CostsView } from "../features/costs/view";
 import {
+  ApiError,
+  getCosts,
   getDataInfo,
+  getPricing,
+  getEvalRun,
+  getGuardrailRules,
+  getGuardrailSummary,
+  listEvalRuns,
+  listGuardrailEvents,
   getGatewaySummary,
   getHealth,
   getTrace,
@@ -30,8 +40,10 @@ import {
   listTraces,
 } from "./client";
 import type {
+  EvalRunList,
   GatewayTurn,
   GatewayTurnList,
+  GuardrailEventList,
   Span,
   TraceDetail,
   TraceList,
@@ -461,6 +473,255 @@ export function useLiveGatewayTurns(view: GatewayView, enabled: boolean): Readon
   );
 
   return fresh;
+}
+
+// ------------------------------------------------------------------ costs (M3)
+
+/** Retry once, but never an answer the server meant (4xx, 501 "not implemented"). */
+const retryOnceIfTransient = (failures: number, error: Error): boolean =>
+  failures < 1 &&
+  !(
+    error instanceof ApiError &&
+    error.status !== 0 &&
+    (error.status < 500 || error.status === 501)
+  );
+
+/** How often the Costs page refreshes its numbers while open. */
+export const COSTS_REFRESH_MS = 15_000;
+/** How many of the most expensive traces the Costs page lists. */
+export const TOP_TRACES = 10;
+
+export function costsKey(view: CostsView, hideSample = false): QueryKey {
+  return ["costs", view.range, view.group, hideSample];
+}
+
+/** Spend per time bucket and group for the range. */
+export function useCosts(view: CostsView) {
+  const hideSample = useHideSample();
+  return useQuery({
+    queryKey: costsKey(view, hideSample),
+    queryFn: ({ signal }) =>
+      getCosts(
+        { from: rangeFrom(view.range), group_by: view.group, ...sampleParam(hideSample) },
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: COSTS_REFRESH_MS,
+    retry: retryOnceIfTransient,
+  });
+}
+
+/** The range's most expensive traces (the traces list sorted by cost). */
+export function useTopCostTraces(range: RangeId) {
+  const hideSample = useHideSample();
+  return useQuery({
+    queryKey: ["top-cost-traces", range, hideSample],
+    queryFn: ({ signal }) =>
+      listTraces(
+        {
+          sort: "cost",
+          order: "desc",
+          limit: TOP_TRACES,
+          from: rangeFrom(range),
+          ...sampleParam(hideSample),
+        },
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: COSTS_REFRESH_MS,
+  });
+}
+
+/** How many budget alerts the Costs page lists (newest first). */
+export const BUDGET_ALERTS_LIMIT = 20;
+
+/** The range's budget alerts (guardrail events of kind "budget"), newest first. */
+export function useBudgetAlerts(range: RangeId) {
+  const hideSample = useHideSample();
+  return useQuery({
+    queryKey: ["budget-alerts", range, hideSample],
+    queryFn: ({ signal }) =>
+      listGuardrailEvents(
+        {
+          kind: ["budget"],
+          limit: BUDGET_ALERTS_LIMIT,
+          from: rangeFrom(range),
+          ...sampleParam(hideSample),
+        },
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: COSTS_REFRESH_MS,
+    retry: retryOnceIfTransient,
+  });
+}
+
+/** The price table every stored span is priced with. Changes only with a server release. */
+export function usePricing() {
+  return useQuery({
+    queryKey: ["pricing"],
+    queryFn: ({ signal }) => getPricing(signal),
+    staleTime: Infinity,
+    retry: retryOnceIfTransient,
+  });
+}
+
+// ------------------------------------------------------------------ guardrails (M3)
+
+export function useGuardrailRules() {
+  return useQuery({
+    queryKey: ["guardrail-rules"],
+    queryFn: ({ signal }) => getGuardrailRules(signal),
+    // The server reloads its rules file; pick up edits without a page reload.
+    refetchInterval: 60_000,
+    retry: retryOnceIfTransient,
+  });
+}
+
+export function guardrailSummaryKey(range: RangeId, hideSample = false): QueryKey {
+  return ["guardrail-summary", range, hideSample];
+}
+
+/** Blocks per rule, redactions per kind and the budget alert count for the range. */
+export function useGuardrailSummary(range: RangeId) {
+  const hideSample = useHideSample();
+  return useQuery({
+    queryKey: guardrailSummaryKey(range, hideSample),
+    queryFn: ({ signal }) =>
+      getGuardrailSummary({ from: rangeFrom(range), ...sampleParam(hideSample) }, signal),
+    placeholderData: keepPreviousData,
+    retry: retryOnceIfTransient,
+  });
+}
+
+/** A page of guardrail events plus the window start it was fetched with. */
+export interface GuardrailPage extends GuardrailEventList {
+  from: string;
+}
+
+export function guardrailEventsKey(view: GuardrailsView, hideSample = false): QueryKey {
+  return ["guardrail-events", view.range, view.kind, hideSample];
+}
+
+/** Blocks, redactions and budget alerts in the range, newest first, paged by cursor. */
+export function useGuardrailEvents(view: GuardrailsView) {
+  const hideSample = useHideSample();
+  return useInfiniteQuery({
+    queryKey: guardrailEventsKey(view, hideSample),
+    queryFn: async ({ pageParam, signal }): Promise<GuardrailPage> => {
+      const from = pageParam?.from ?? rangeFrom(view.range);
+      const list = await listGuardrailEvents(
+        {
+          limit: PAGE_SIZE,
+          cursor: pageParam?.cursor,
+          from,
+          ...kindParams(view),
+          ...sampleParam(hideSample),
+        },
+        signal,
+      );
+      return { ...list, from };
+    },
+    initialPageParam: null as PageParam | null,
+    getNextPageParam: (last): PageParam | null =>
+      last.next_cursor ? { cursor: last.next_cursor, from: last.from } : null,
+    placeholderData: keepPreviousData,
+    retry: retryOnceIfTransient,
+  });
+}
+
+/** Put unseen events into the first page (kept newest first); known ones are left alone. */
+export function mergeGuardrailEvents(
+  data: InfiniteData<GuardrailPage>,
+  update: GuardrailEventList,
+): { data: InfiniteData<GuardrailPage>; added: string[] } {
+  const known = new Set(data.pages.flatMap((p) => p.events.map(eventKey)));
+  const fresh = update.events.filter((e) => !known.has(eventKey(e)));
+  const [first, ...rest] = data.pages;
+  if (!first) return { data, added: [] };
+  const events = fresh.length ? [...fresh, ...first.events].sort(byTimeDesc) : first.events;
+  return {
+    data: { ...data, pages: [{ ...first, events, as_of: update.as_of }, ...rest] },
+    added: fresh.map(eventKey),
+  };
+}
+
+/**
+ * Live guardrail events: every LIST_POLL_MS ask for events stored since the previous response's
+ * `as_of` (same window and kind filter), prepend the new ones and refresh the counts. Returns
+ * the event keys to highlight.
+ */
+export function useLiveGuardrailEvents(
+  view: GuardrailsView,
+  enabled: boolean,
+): ReadonlySet<string> {
+  const client = useQueryClient();
+  const [fresh, highlight] = useFreshIds();
+  const hideSample = useHideSample();
+
+  usePolling(
+    async (signal) => {
+      const key = guardrailEventsKey(view, hideSample);
+      const data = client.getQueryData<InfiniteData<GuardrailPage>>(key);
+      const first = data?.pages[0];
+      if (!first || client.isFetching({ queryKey: key }) > 0) return;
+      const update = await listGuardrailEvents(
+        {
+          limit: LIVE_LIMIT,
+          since: first.as_of,
+          from: rangeFrom(view.range),
+          ...kindParams(view),
+          ...sampleParam(hideSample),
+        },
+        signal,
+      );
+      const summaryKey = guardrailSummaryKey(view.range, hideSample);
+      if (update.events.length >= LIVE_LIMIT || update.next_cursor !== null) {
+        // Too much changed to merge; start over.
+        await client.invalidateQueries({ queryKey: key });
+        void client.invalidateQueries({ queryKey: summaryKey });
+        return;
+      }
+      const current = client.getQueryData<InfiniteData<GuardrailPage>>(key);
+      if (!current) return;
+      const merged = mergeGuardrailEvents(current, update);
+      client.setQueryData(key, merged.data);
+      if (merged.added.length > 0) {
+        highlight(merged.added);
+        void client.invalidateQueries({ queryKey: summaryKey });
+      }
+    },
+    { intervalMs: LIST_POLL_MS, enabled },
+  );
+
+  return fresh;
+}
+
+// ------------------------------------------------------------------ evals (M3)
+
+export function useEvalRuns() {
+  const hideSample = useHideSample();
+  return useInfiniteQuery({
+    queryKey: ["eval-runs", hideSample],
+    queryFn: ({ pageParam, signal }): Promise<EvalRunList> =>
+      listEvalRuns(
+        { limit: PAGE_SIZE, cursor: pageParam ?? undefined, ...sampleParam(hideSample) },
+        signal,
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last): string | null => last.next_cursor,
+    // New runs arrive from CI; keep the list current without live merging.
+    refetchInterval: COSTS_REFRESH_MS,
+    retry: retryOnceIfTransient,
+  });
+}
+
+export function useEvalRun(runId: string) {
+  return useQuery({
+    queryKey: ["eval-run", runId],
+    queryFn: ({ signal }) => getEvalRun(runId, signal),
+    retry: retryOnceIfTransient,
+  });
 }
 
 export function useHealth() {

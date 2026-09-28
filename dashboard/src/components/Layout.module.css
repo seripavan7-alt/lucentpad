@@ -78,12 +78,6 @@
   flex: 1;
 }
 
-.milestone {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  font-feature-settings: var(--font-features-numeric);
-}
-
 /* Page-specific sidebar content (e.g. the Traces filters); scrolls on its own. */
 .slot {
   flex: 1;
@@ -244,7 +238,6 @@
     padding: 0;
   }
 
-  .milestone,
   .apiStatus,
   .slot {
     display: none;

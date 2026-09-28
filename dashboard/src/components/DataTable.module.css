@@ -1,0 +1,147 @@
+/*
+ * The dashboard's list-table language (as on Traces and Gateway): fixed layout, hairline rows,
+ * page-aligned first/last columns, sideways scroll below the table's min-width.
+ */
+.wrap {
+  overflow-x: auto;
+}
+
+.wrap[data-stale="true"] tbody {
+  opacity: 0.55;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.table {
+  width: 100%;
+  min-width: var(--table-min, 720px);
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table thead th {
+  height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--color-bg);
+  border-bottom: var(--border);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td,
+.table tbody th {
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border);
+  font-weight: var(--weight-regular);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table tr > :first-child {
+  padding-left: var(--space-6);
+}
+
+.table tr > :last-child {
+  padding-right: var(--space-6);
+}
+
+@media (max-width: 720px) {
+  .table tr > :first-child {
+    padding-left: var(--space-4);
+  }
+
+  .table tr > :last-child {
+    padding-right: var(--space-4);
+  }
+}
+
+.right {
+  text-align: right !important;
+}
+
+.clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.secondary {
+  color: var(--color-text-secondary);
+}
+
+.tertiary {
+  color: var(--color-text-tertiary);
+}
+
+.link:hover {
+  color: var(--color-accent-text);
+}
+
+.row {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.row:hover {
+  background: var(--color-surface-hover);
+}
+
+.row[data-fresh="true"] {
+  animation: arrive 2.5s var(--ease);
+}
+
+@keyframes arrive {
+  from {
+    background: var(--color-accent-subtle);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row[data-fresh="true"] {
+    animation: none;
+    background: var(--color-accent-subtle);
+  }
+}
+
+/* Section heading row above a table, aligned with the table's first column. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6) var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .sectionHead {
+    padding-inline: var(--space-4);
+  }
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.sectionNote {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+.note {
+  padding: var(--space-3) var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}

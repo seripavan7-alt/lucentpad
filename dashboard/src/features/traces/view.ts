@@ -194,3 +194,17 @@ export function facetRows(
     (a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0),
   );
 }
+
+/** The range presets as segmented-control options. */
+export const RANGE_OPTIONS: readonly { value: RangeId; label: string }[] = RANGES.map((r) => ({
+  value: r.id,
+  label: r.id,
+}));
+
+/** The next wider preset an empty view offers: 24 hours, or 30 days from 24h and up. */
+export function widerRange(range: RangeId): RangeId | null {
+  const ms = rangeInfo(range).ms;
+  if (ms < rangeInfo("24h").ms) return "24h";
+  if (ms < rangeInfo("30d").ms) return "30d";
+  return null;
+}

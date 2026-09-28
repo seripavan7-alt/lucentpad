@@ -35,3 +35,21 @@ class Attr:
     OUTPUT_PREVIEW: Final = "lucentpad.output.preview"
     INPUT_TRUNCATED: Final = "lucentpad.input.truncated"
     OUTPUT_TRUNCATED: Final = "lucentpad.output.truncated"
+    GUARDRAIL_RULE: Final = "lucentpad.guardrail.rule"
+    GUARDRAIL_REASON: Final = "lucentpad.guardrail.reason"
+    BUDGET_LIMIT_USD: Final = "lucentpad.budget.limit_usd"
+    BUDGET_SPENT_USD: Final = "lucentpad.budget.spent_usd"
+    BUDGET_SCOPE: Final = "lucentpad.budget.scope"
+    REDACTION_KIND: Final = "lucentpad.redaction.kind"
+    REDACTION_COUNT: Final = "lucentpad.redaction.count"
+
+
+class EventName:
+    """Subset of ``lucentpad_server.schema.EventName`` (same names, same values)."""
+
+    BUDGET_ALERT: Final = "lucentpad.budget.alert"
+    REDACTION: Final = "lucentpad.redaction"
+    GUARDRAIL_BLOCK: Final = "lucentpad.guardrail.block"
+
+
+SPAN_EVENTS_MAX: Final = 100  # schema.Span.events max_length

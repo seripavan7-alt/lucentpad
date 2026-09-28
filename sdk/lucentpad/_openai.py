@@ -12,7 +12,14 @@ from collections.abc import Iterable
 from typing import Any
 
 from ._core import active
-from ._llm import LLMCall, block_get, instrument_async_stream, instrument_stream
+from ._llm import (
+    LLMCall,
+    apreflight,
+    block_get,
+    instrument_async_stream,
+    instrument_stream,
+    preflight,
+)
 
 SYSTEM = "openai"
 _MARK = "_lucentpad_wrapped"
@@ -59,6 +66,31 @@ def input_preview(messages: Any) -> str | None:
     if tail:
         return "\n".join(reversed(tail))
     return None
+
+
+def user_text(messages: Any) -> str | None:
+    """The text of the last ``role="user"`` message (text parts only), for prompt rules."""
+    if not isinstance(messages, list | tuple):
+        return None
+    for m in reversed(messages):
+        if block_get(m, "role") != "user":
+            continue
+        content = block_get(m, "content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, Iterable):
+            parts = [
+                str(block_get(p, "text", "") or "")
+                for p in content
+                if block_get(p, "type") == "text"
+            ]
+            return "\n".join(p for p in parts if p) or None
+        return None
+    return None
+
+
+def _prompt(kwargs: dict[str, Any]) -> Any:
+    return lambda: user_text(kwargs.get("messages"))
 
 
 def _record_completion(call: LLMCall, completion: Any) -> None:
@@ -159,6 +191,7 @@ def _wrap_create(original: Any) -> Any:
     def create(*args: Any, **kwargs: Any) -> Any:
         if active() is None:
             return original(*args, **kwargs)
+        preflight(_prompt(kwargs))
         kwargs, call, streaming, injected = _begin(kwargs)
         try:
             result = original(*args, **kwargs)
@@ -185,6 +218,7 @@ def _wrap_acreate(original: Any) -> Any:
     async def create(*args: Any, **kwargs: Any) -> Any:
         if active() is None:
             return await original(*args, **kwargs)
+        await apreflight(_prompt(kwargs))
         kwargs, call, streaming, injected = _begin(kwargs)
         try:
             result = await original(*args, **kwargs)

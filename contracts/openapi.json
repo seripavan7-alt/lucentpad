@@ -1,6 +1,92 @@
 {
   "components": {
     "schemas": {
+      "CostPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "description": "Start of the time bucket.",
+            "format": "date-time",
+            "title": "Bucket",
+            "type": "string"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "group": {
+            "description": "Model, client or service name (`other` when unknown).",
+            "title": "Group",
+            "type": "string"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket",
+          "group",
+          "cost_usd",
+          "input_tokens",
+          "output_tokens",
+          "calls"
+        ],
+        "title": "CostPoint",
+        "type": "object"
+      },
+      "CostSeries": {
+        "additionalProperties": false,
+        "description": "Spend over time, one point per (bucket, group) with any cost. Buckets are aligned to\n``bucket_seconds`` (chosen from the window: 5 min up to 1 day).",
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "bucket_seconds": {
+            "title": "Bucket Seconds",
+            "type": "integer"
+          },
+          "group_by": {
+            "enum": [
+              "model",
+              "client",
+              "service"
+            ],
+            "title": "Group By",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/CostPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "total_cost_usd": {
+            "title": "Total Cost Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "points",
+          "bucket_seconds",
+          "group_by",
+          "total_cost_usd",
+          "as_of"
+        ],
+        "title": "CostSeries",
+        "type": "object"
+      },
       "DataInfo": {
         "additionalProperties": false,
         "description": "What the database holds: the startup sample, real recorded data, or both.",
@@ -33,6 +119,509 @@
           "detail"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EvalCaseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when the case is new.",
+            "title": "Baseline Passed"
+          },
+          "case": {
+            "title": "Case",
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/EvalCheckResult"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "output_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Preview"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "case",
+          "passed",
+          "baseline_passed",
+          "checks",
+          "cost_usd",
+          "latency_ms",
+          "trace_id",
+          "output_preview"
+        ],
+        "title": "EvalCaseResult",
+        "type": "object"
+      },
+      "EvalCheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "description": "e.g. `contains: refund`, `tool_called: lookup_order`.",
+            "title": "Check",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "check",
+          "passed"
+        ],
+        "title": "EvalCheckResult",
+        "type": "object"
+      },
+      "EvalRun": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cost Usd"
+          },
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/EvalCaseResult"
+            },
+            "maxItems": 500,
+            "title": "Cases",
+            "type": "array"
+          },
+          "ci_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Url"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "git_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Ref"
+          },
+          "git_sha": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Sha"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "regressed",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suite": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "status",
+          "started_at",
+          "duration_ms",
+          "model",
+          "cost_usd",
+          "baseline_cost_usd",
+          "cases",
+          "id"
+        ],
+        "title": "EvalRun",
+        "type": "object"
+      },
+      "EvalRunIn": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /v1/evals/runs`` (sent by ``lucentpad eval``).",
+        "properties": {
+          "baseline_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cost Usd"
+          },
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/EvalCaseResult"
+            },
+            "maxItems": 500,
+            "title": "Cases",
+            "type": "array"
+          },
+          "ci_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Url"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "git_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Ref"
+          },
+          "git_sha": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Sha"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "regressed",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suite": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "status",
+          "started_at",
+          "duration_ms",
+          "model",
+          "cost_usd",
+          "baseline_cost_usd",
+          "cases"
+        ],
+        "title": "EvalRunIn",
+        "type": "object"
+      },
+      "EvalRunList": {
+        "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "runs": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvalRunSummary"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "next_cursor"
+        ],
+        "title": "EvalRunList",
+        "type": "object"
+      },
+      "EvalRunSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cost Usd"
+          },
+          "ci_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Url"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "git_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Ref"
+          },
+          "git_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Sha"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "regressions": {
+            "title": "Regressions",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "regressed",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suite": {
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "suite",
+          "status",
+          "started_at",
+          "passed",
+          "failed",
+          "regressions",
+          "cost_usd",
+          "git_sha",
+          "git_ref",
+          "ci_url"
+        ],
+        "title": "EvalRunSummary",
         "type": "object"
       },
       "FacetValue": {
@@ -320,6 +909,353 @@
         "title": "GatewayTurnList",
         "type": "object"
       },
+      "GuardrailEvent": {
+        "additionalProperties": false,
+        "description": "A block (a ``kind=guardrail`` span), a redaction (a ``lucentpad.redaction`` event) or a\nbudget alert (a ``lucentpad.budget.alert`` event).",
+        "properties": {
+          "budget_limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "budget alerts",
+            "title": "Budget Limit Usd"
+          },
+          "budget_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "budget alerts: run | session",
+            "title": "Budget Scope"
+          },
+          "budget_spent_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "budget alerts",
+            "title": "Budget Spent Usd"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "count": {
+            "description": "redactions: how many values; blocks and budget alerts: 1",
+            "title": "Count",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "block",
+              "redaction",
+              "budget"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "blocks: why",
+            "title": "Reason"
+          },
+          "redaction_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "redactions: email, api_key, card, ...",
+            "title": "Redaction Kind"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "blocks: the rule id",
+            "title": "Rule"
+          },
+          "source": {
+            "enum": [
+              "sdk",
+              "gateway"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "time": {
+            "format": "date-time",
+            "title": "Time",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "time",
+          "trace_id",
+          "span_id",
+          "source",
+          "client",
+          "rule",
+          "reason",
+          "redaction_kind",
+          "count"
+        ],
+        "title": "GuardrailEvent",
+        "type": "object"
+      },
+      "GuardrailEventList": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "events": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "events",
+          "next_cursor",
+          "as_of"
+        ],
+        "title": "GuardrailEventList",
+        "type": "object"
+      },
+      "GuardrailRule": {
+        "additionalProperties": false,
+        "description": "A blocking rule. ``prompt`` rules match the user's message (any keyword, case-insensitive,\nor the regex); ``tool`` rules match a tool call by name and a condition on its arguments,\ne.g. ``amount > 200`` (comparisons on argument fields; no code is evaluated).",
+        "properties": {
+          "condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tool rules, e.g. `amount > 200`",
+            "title": "Condition"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "keywords": {
+            "description": "prompt rules",
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "message": {
+            "description": "Shown to the caller when the rule blocks.",
+            "title": "Message",
+            "type": "string"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "prompt rules: a regex",
+            "title": "Pattern"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tool rules: the tool name",
+            "title": "Tool"
+          },
+          "type": {
+            "enum": [
+              "prompt",
+              "tool"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "message"
+        ],
+        "title": "GuardrailRule",
+        "type": "object"
+      },
+      "GuardrailRuleCount": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "title": "Blocks",
+            "type": "integer"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "blocks"
+        ],
+        "title": "GuardrailRuleCount",
+        "type": "object"
+      },
+      "GuardrailRules": {
+        "additionalProperties": false,
+        "properties": {
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/GuardrailRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "source": {
+            "description": "Where the rules came from: a file path or `built-in`.",
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "description": "Changes whenever the rules change (for client caches).",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rules",
+          "source",
+          "version"
+        ],
+        "title": "GuardrailRules",
+        "type": "object"
+      },
+      "GuardrailSummary": {
+        "additionalProperties": false,
+        "description": "Counts for a window: blocks per rule, redactions per kind.",
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/GuardrailRuleCount"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "budget_alerts": {
+            "default": 0,
+            "title": "Budget Alerts",
+            "type": "integer"
+          },
+          "redactions": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "title": "Redactions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks",
+          "redactions",
+          "as_of"
+        ],
+        "title": "GuardrailSummary",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -389,6 +1325,64 @@
           "write_errors_total"
         ],
         "title": "IngestStats",
+        "type": "object"
+      },
+      "ModelPrice": {
+        "additionalProperties": false,
+        "description": "USD per million tokens.",
+        "properties": {
+          "cache_read": {
+            "title": "Cache Read",
+            "type": "number"
+          },
+          "cache_write": {
+            "title": "Cache Write",
+            "type": "number"
+          },
+          "input": {
+            "title": "Input",
+            "type": "number"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output": {
+            "title": "Output",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model",
+          "input",
+          "output",
+          "cache_read",
+          "cache_write"
+        ],
+        "title": "ModelPrice",
+        "type": "object"
+      },
+      "PriceTable": {
+        "additionalProperties": false,
+        "properties": {
+          "checked": {
+            "description": "When the list prices were last checked (ISO date).",
+            "title": "Checked",
+            "type": "string"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPrice"
+            },
+            "title": "Prices",
+            "type": "array"
+          }
+        },
+        "required": [
+          "prices",
+          "checked"
+        ],
+        "title": "PriceTable",
         "type": "object"
       },
       "Span": {
@@ -1061,6 +2055,109 @@
         ]
       }
     },
+    "/v1/costs": {
+      "get": {
+        "description": "Spend over time, grouped by model, client or service.",
+        "operationId": "costs_v1_costs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "enum": [
+                "model",
+                "client",
+                "service"
+              ],
+              "title": "Group By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Sample",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSeries"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Costs",
+        "tags": [
+          "query"
+        ]
+      }
+    },
     "/v1/data": {
       "get": {
         "description": "Whether the database holds the startup sample data, real data, or both.",
@@ -1080,6 +2177,216 @@
         "summary": "Data Info",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/v1/evals/runs": {
+      "get": {
+        "description": "Eval runs, newest first.",
+        "operationId": "list_eval_runs_v1_evals_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "suite",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Suite"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Sample",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "List Eval Runs",
+        "tags": [
+          "evals"
+        ]
+      },
+      "post": {
+        "description": "Record an eval run (posted by `lucentpad eval`).",
+        "operationId": "create_eval_run_v1_evals_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Create Eval Run",
+        "tags": [
+          "evals"
+        ]
+      }
+    },
+    "/v1/evals/runs/{run_id}": {
+      "get": {
+        "operationId": "get_eval_run_v1_evals_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "Get Eval Run",
+        "tags": [
+          "evals"
         ]
       }
     },
@@ -1331,6 +2638,283 @@
         ]
       }
     },
+    "/v1/guardrails/events": {
+      "get": {
+        "description": "Blocks, redactions and budget alerts, newest first.",
+        "operationId": "guardrail_events_v1_guardrails_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "block",
+                      "redaction",
+                      "budget"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Sample",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailEventList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Guardrail Events",
+        "tags": [
+          "guardrails"
+        ]
+      }
+    },
+    "/v1/guardrails/rules": {
+      "get": {
+        "description": "The active blocking rules. The SDK and gateway fetch these and refresh them.",
+        "operationId": "guardrail_rules_v1_guardrails_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailRules"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Guardrail Rules",
+        "tags": [
+          "guardrails"
+        ]
+      }
+    },
+    "/v1/guardrails/summary": {
+      "get": {
+        "description": "Blocks per rule and redactions per kind in the window.",
+        "operationId": "guardrail_summary_v1_guardrails_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_sample",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Sample",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not implemented yet."
+          }
+        },
+        "summary": "Guardrail Summary",
+        "tags": [
+          "guardrails"
+        ]
+      }
+    },
     "/v1/ingest/stats": {
       "get": {
         "operationId": "ingest_stats_v1_ingest_stats_get",
@@ -1349,6 +2933,28 @@
         "summary": "Ingest Stats",
         "tags": [
           "ingest"
+        ]
+      }
+    },
+    "/v1/pricing": {
+      "get": {
+        "description": "The price table that prices every stored span (USD per million tokens). The SDK and\ngateway use it to estimate spend for budgets.",
+        "operationId": "price_table_v1_pricing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTable"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Price Table",
+        "tags": [
+          "meta"
         ]
       }
     },

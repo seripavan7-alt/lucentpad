@@ -12,6 +12,7 @@ from lucentpad_server.gateway.parse import (
     parse_request,
 )
 from lucentpad_server.gateway.sessions import Session, new_hex_id
+from lucentpad_server.pricing import cost_usd
 from lucentpad_server.schema import (
     PREVIEW_MAX_CHARS,
     Attr,
@@ -188,6 +189,93 @@ def llm_span(call: CallRecord) -> Span:
         attributes=attrs,
         events=events[:100],
     )
+
+
+def guardrail_span(
+    *,
+    session: Session,
+    provider: GatewayProvider,
+    fingerprint: str | None,
+    start: datetime,
+    duration_ms: float,
+    request_model: str | None,
+    rule: str,
+    reason: str,
+    prompt: str | None,
+) -> Span:
+    """A request a prompt rule blocked before it reached the upstream (D22): its own span,
+    ``kind=guardrail``, ``status=blocked``, in the session's trace. ``prompt`` is the matched
+    user text (a preview; None when capture is off)."""
+    attrs: Attributes = {
+        Attr.SERVICE_NAME: GATEWAY_SERVICE,
+        Attr.CLIENT: session.client,
+        Attr.SESSION_ID: session.session_id,
+        Attr.GEN_AI_SYSTEM: provider,
+        Attr.GATEWAY_UPSTREAM: provider,
+        Attr.GUARDRAIL_RULE: rule,
+        Attr.GUARDRAIL_REASON: reason,
+    }
+    if fingerprint:
+        attrs[Attr.KEY_FINGERPRINT] = fingerprint
+    if request_model:
+        attrs[Attr.GEN_AI_REQUEST_MODEL] = request_model
+    if prompt is not None:
+        attrs.update(_previews(prompt, None, False))
+    return Span(
+        trace_id=session.trace_id,
+        span_id=new_hex_id(8),
+        parent_span_id=session.root_span_id,
+        name=f"guardrail {rule}"[:200],
+        kind="guardrail",
+        source="gateway",
+        start_time=start,
+        end_time=start + timedelta(milliseconds=max(duration_ms, 0.0)),
+        status="blocked",
+        status_message=reason[:2000],
+        attributes=attrs,
+        events=[
+            SpanEvent(
+                name=EventName.GUARDRAIL_BLOCK,
+                time=start,
+                attributes={Attr.GUARDRAIL_RULE: rule, Attr.GUARDRAIL_REASON: reason},
+            )
+        ],
+    )
+
+
+def _int(attrs: Attributes, key: str) -> int:
+    value = attrs.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def turn_cost(span: Span) -> float | None:
+    """Estimated cost of a turn from its tokens (``pricing.cost_usd``, cache tokens included),
+    the same way stored spans are priced; None when the model is unknown or unpriced."""
+    a = span.attributes
+    model = a.get(Attr.GEN_AI_RESPONSE_MODEL) or a.get(Attr.GEN_AI_REQUEST_MODEL)
+    if not isinstance(model, str) or not model:
+        return None
+    return cost_usd(
+        model,
+        _int(a, Attr.GEN_AI_INPUT_TOKENS),
+        _int(a, Attr.GEN_AI_OUTPUT_TOKENS),
+        _int(a, Attr.GEN_AI_CACHE_READ_TOKENS),
+        _int(a, Attr.GEN_AI_CACHE_CREATION_TOKENS),
+    )
+
+
+def with_budget_alert(span: Span, limit_usd: float, spent_usd: float) -> Span:
+    """``span`` plus a ``lucentpad.budget.alert`` event (session scope) at its end."""
+    event = SpanEvent(
+        name=EventName.BUDGET_ALERT,
+        time=span.end_time,
+        attributes={
+            Attr.BUDGET_LIMIT_USD: limit_usd,
+            Attr.BUDGET_SPENT_USD: round(spent_usd, 6),
+            Attr.BUDGET_SCOPE: "session",
+        },
+    )
+    return span.model_copy(update={"events": [*span.events[:99], event]})
 
 
 def utcnow() -> datetime:

@@ -8,6 +8,7 @@ import inspect
 import threading
 
 import anthropic
+import httpx
 import httpx2
 import pytest
 from conftest import (
@@ -22,6 +23,7 @@ from conftest import (
 
 import lucentpad
 from lucentpad import _core
+from lucentpad._exporter import Exporter
 from lucentpad_server.schema import Attr
 
 
@@ -186,6 +188,12 @@ def test_disabled_is_a_noop(how: str, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_endpoint_env_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    offline = Ingest()  # the exporter's client also fetches rules/prices: keep it off the network
+    monkeypatch.setattr(
+        _core,
+        "Exporter",
+        lambda endpoint: Exporter(endpoint, transport=httpx.MockTransport(offline.handler)),
+    )
     monkeypatch.setenv("LUCENTPAD_ENDPOINT", "http://collector.test:9999")
     lucentpad.init(service_name="svc")
     exporter = _core.current_exporter()
@@ -194,6 +202,7 @@ def test_endpoint_env_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None
     exporter = _core.current_exporter()
     assert exporter is not None and exporter.url == "http://explicit.test/v1/spans"
     lucentpad.shutdown()
+    assert {r.url.host for r in offline.api_requests} <= {"collector.test", "explicit.test"}
 
 
 def test_reinit_replaces_exporter() -> None:

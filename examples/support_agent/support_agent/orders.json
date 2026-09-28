@@ -33,5 +33,18 @@
     ],
     "total_usd": 489.0,
     "notes": "Over the refund limit: used by the guardrail demo step (M3)."
+  },
+  "1061": {
+    "order_id": "1061",
+    "status": "processing",
+    "placed_at": "2026-09-26",
+    "delivered_at": null,
+    "customer": {"name": "Sam Rivera", "email": "sam.rivera@example.com"},
+    "items": [
+      {"sku": "LP-SCALE-03", "name": "Coffee scale", "qty": 1, "price_usd": 45.0},
+      {"sku": "LP-BEANS-250", "name": "House blend beans (250 g)", "qty": 2, "price_usd": 14.0}
+    ],
+    "total_usd": 73.0,
+    "notes": "Not shipped yet, so its delivery can be rescheduled."
   }
 }

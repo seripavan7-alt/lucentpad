@@ -8,7 +8,8 @@ latency, cost and guardrail events. It connects two ways:
   provider and records each turn on the way through.
 
 > **Project status:** LucentPad is being built in the open. The dashboard, the Python SDK, the demo
-> agent and the gateway for Claude Code and Copilot work today. Guardrails, budgets and evals are next.
+> agent, the gateway for Claude Code and Copilot, guardrails, budgets and the eval gate work today.
+> The hosted demo and a short video come next.
 
 ## 1. Run it locally
 
@@ -34,7 +35,10 @@ runs and Claude Code / Copilot sessions, including errors, a guardrail block and
 - **Trace detail** shows the waterfall: every model call and tool step on one time axis, drawing live
   while the run is going, with the cost of each model call. Click a span to see its tokens, cost,
   latency, input and output.
-- **Gateway** shows Claude Code and Copilot sessions turn by turn. **Costs, Guardrails, Evals** arrive in M3.
+- **Gateway** shows Claude Code and Copilot sessions turn by turn.
+- **Costs** shows spend over time by model, client or service, the most expensive traces and budget
+  alerts. **Guardrails** lists the active rules and every block, redaction and budget alert.
+  **Evals** shows `lucentpad eval` runs case by case, with regressions flagged.
 
 ## 3. Watch the demo agent
 
@@ -82,7 +86,45 @@ claude
 Each session appears on the **Gateway** page with tokens and cost per turn. Copilot CLI and Copilot
 Chat work too, when they use your own API key; see [the gateway guide](gateway.md) for their setup.
 
-## 6. Contribute
+## 6. Guardrails and budgets
+
+LucentPad redacts API keys, email addresses and card numbers from everything it stores (the requests
+sent to the provider are never changed). Blocking rules live in one YAML file on the server:
+
+```yaml
+# lucentpad.rules.yaml  (point LUCENTPAD_RULES_FILE at it)
+rules:
+  - id: refund_limit
+    type: tool                 # checked before the tool runs
+    tool: issue_refund
+    condition: amount > 200
+    message: Refunds over $200 need a human to approve them.
+  - id: no_credentials
+    type: prompt               # checked before the model is called
+    keywords: [password, "api key"]
+    message: Don't paste credentials into the chat.
+```
+
+Without a file, the built-in `refund_limit` rule is active. The SDK raises
+`lucentpad.GuardrailBlocked` (catch it and answer the user); the gateway returns an API error that
+Claude Code or Copilot shows. Every block is recorded on the trace.
+
+Budgets alert by default: `with lucentpad.trace("run", budget_usd=0.50): ...` adds an alert when the
+run crosses $0.50; `on_budget="stop"` stops the next model call instead. Gateway sessions can get a
+budget with `LUCENTPAD_GATEWAY_SESSION_BUDGET_USD` (alerts only; a coding session is never cut off).
+
+## 7. Catch regressions with evals
+
+```sh
+make eval                                   # the demo agent's suite, offline, against the baseline
+uv run lucentpad eval evals/support_agent.yaml --model claude-haiku-4-5   # real model; needs a key
+```
+
+Cases and checks live in `evals/support_agent.yaml`; see [evals/README.md](../evals/README.md). The
+`eval` GitHub workflow runs the suite on pull requests that touch the agent and fails the check when
+a case that used to pass now fails, or cost rises more than 25%.
+
+## 8. Contribute
 
 Run `make check` (lint, types, tests, build) before opening a pull request. Tests never call real LLM
 APIs.

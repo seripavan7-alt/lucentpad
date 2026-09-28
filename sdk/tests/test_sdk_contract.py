@@ -32,6 +32,9 @@ def test_duplicated_constants_match_schema() -> None:
     for name, value in vars(_attrs.Attr).items():
         if name.isupper():
             assert getattr(schema.Attr, name) == value, name
+    for name, value in vars(_attrs.EventName).items():
+        if name.isupper():
+            assert getattr(schema.EventName, name) == value, name
     assert _attrs.PREVIEW_MAX_CHARS == schema.PREVIEW_MAX_CHARS
     assert _attrs.MAX_BATCH_SPANS == schema.MAX_BATCH_SPANS
     fields = schema.Span.model_fields
@@ -41,6 +44,9 @@ def test_duplicated_constants_match_schema() -> None:
     assert any(
         getattr(m, "max_length", None) == _attrs.STATUS_MESSAGE_MAX_CHARS
         for m in fields["status_message"].metadata
+    )
+    assert any(
+        getattr(m, "max_length", None) == _attrs.SPAN_EVENTS_MAX for m in fields["events"].metadata
     )
 
 

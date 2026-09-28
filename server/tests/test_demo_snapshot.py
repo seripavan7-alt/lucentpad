@@ -1,10 +1,12 @@
 """The static demo's data, built from the real API over the deterministic sample.
 
-``dashboard/src/demo/snapshot.json`` holds every trace summary and span; ``parity.json`` records
-how the real API pages a set of list queries (traces and gateway turns), facet counts and gateway
-summaries, so the dashboard's in-browser adapter can be checked
-against it (``src/demo/adapter.test.ts``). Run ``make demo-snapshot`` to rewrite both files;
-otherwise this test fails when the committed files have drifted from the API.
+``dashboard/src/demo/snapshot.json`` holds every trace summary and span, the sample eval runs
+(``eval_runs``, full detail, newest first) and the built-in guardrail rules (``guardrail_rules``);
+``parity.json`` records how the real API pages a set of list queries (traces, gateway turns,
+guardrail events, eval runs), facet counts, gateway and guardrail summaries and cost series, so
+the dashboard's in-browser adapter can be checked against it (``src/demo/adapter.test.ts``).
+Run ``make demo-snapshot`` to rewrite both files; otherwise this test fails when the committed
+files have drifted from the API.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from lucentpad_server import db, sample
 from lucentpad_server.app import create_app
@@ -105,6 +108,68 @@ GATEWAY_SUMMARY_PARITY_QUERIES: list[dict[str, Any]] = [
 ]
 
 
+# M3: Guardrails page (`GET /v1/guardrails/events`, paged, newest first by (time, trace_id,
+# span_id, event position); `GET /v1/guardrails/summary`), Costs page (`GET /v1/costs`) and Evals
+# page (`GET /v1/evals/runs`, paged, newest first by (started_at, id)).
+GUARDRAIL_EVENTS_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"limit": 200},
+    {"limit": 9},
+    {"kind": "block"},
+    {"kind": "redaction", "limit": 20},
+    {"kind": ["block", "redaction"], "limit": 30},
+    {"from": _ago(days=2)},
+    {"to": _ago(days=5), "limit": 10},
+    {"from": _ago(days=4), "to": _ago(days=3), "kind": "redaction"},
+]
+GUARDRAIL_SUMMARY_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"from": _ago(days=1)},
+    {"from": _ago(days=4), "to": _ago(days=2)},
+    {"from": NOW.isoformat()},
+]
+COST_PARITY_QUERIES: list[dict[str, Any]] = [
+    {"group_by": group, **window}
+    for group in ("model", "client", "service")
+    for window in (
+        {"from": _ago(days=7), "to": NOW.isoformat()},
+        {"from": _ago(days=1), "to": NOW.isoformat()},
+        {"from": _ago(hours=2), "to": NOW.isoformat()},
+        {"from": _ago(days=3), "to": _ago(days=2)},
+    )
+] + [{}, {"from": NOW.isoformat(), "to": _ago(days=-1)}]
+EVAL_RUNS_PARITY_QUERIES: list[dict[str, Any]] = [
+    {},
+    {"limit": 3},
+    {"suite": "support_agent", "limit": 5},
+    {"suite": "nope"},
+]
+
+
+async def _paged(
+    client: httpx.AsyncClient, path: str, key: str, params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Every page of a list query: the items as returned plus whether another page follows."""
+    pages: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        r = await client.get(path, params={**params, **({"cursor": cursor} if cursor else {})})
+        r.raise_for_status()
+        body = r.json()
+        pages.append({key: body[key], "has_next": body["next_cursor"] is not None})
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return pages
+
+
+async def _get(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> dict[str, Any]:
+    r = await client.get(path, params=params)
+    r.raise_for_status()
+    body: dict[str, Any] = r.json()
+    body.pop("as_of", None)
+    return body
+
+
 async def _gateway_pages(client: httpx.AsyncClient, params: dict[str, Any]) -> list[dict[str, Any]]:
     """Every page of a gateway turns query, as span ids plus whether another page follows."""
     pages: list[dict[str, Any]] = []
@@ -166,7 +231,17 @@ async def _build(client: httpx.AsyncClient) -> tuple[dict[str, Any], dict[str, A
         detail = r.json()
         traces.append(detail["trace"])
         spans[tid] = detail["spans"]
-    snapshot = {"generated_at": NOW.isoformat(), "traces": traces, "spans": spans}
+    eval_runs = []
+    for page in await _paged(client, "/v1/evals/runs", "runs", {"limit": 200}):
+        for run in page["runs"]:
+            eval_runs.append(await _get(client, f"/v1/evals/runs/{run['id']}", {}))
+    snapshot = {
+        "generated_at": NOW.isoformat(),
+        "traces": traces,
+        "spans": spans,
+        "eval_runs": eval_runs,
+        "guardrail_rules": await _get(client, "/v1/guardrails/rules", {}),
+    }
     facets = []
     for q in FACET_PARITY_QUERIES:
         r = await client.get("/v1/traces/facets", params=q)
@@ -182,6 +257,21 @@ async def _build(client: httpx.AsyncClient) -> tuple[dict[str, Any], dict[str, A
             {"params": q, "summary": await _gateway_summary(client, q)}
             for q in GATEWAY_SUMMARY_PARITY_QUERIES
         ],
+        "guardrail_events": [
+            {"params": q, "pages": await _paged(client, "/v1/guardrails/events", "events", q)}
+            for q in GUARDRAIL_EVENTS_PARITY_QUERIES
+        ],
+        "guardrail_summary": [
+            {"params": q, "summary": await _get(client, "/v1/guardrails/summary", q)}
+            for q in GUARDRAIL_SUMMARY_PARITY_QUERIES
+        ],
+        "costs": [
+            {"params": q, "series": await _get(client, "/v1/costs", q)} for q in COST_PARITY_QUERIES
+        ],
+        "eval_runs": [
+            {"params": q, "pages": await _paged(client, "/v1/evals/runs", "runs", q)}
+            for q in EVAL_RUNS_PARITY_QUERIES
+        ],
     }
     return snapshot, parity
 
@@ -190,16 +280,19 @@ def _write(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, separators=(",", ":"), sort_keys=True) + "\n")
 
 
-async def test_demo_snapshot_matches_api(db_url: str) -> None:
+async def test_demo_snapshot_matches_api(db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     pool = await db.create_pool(db_url)
     try:
         await db.migrate(pool)
-        await SpanStore(pool).insert_spans(sample.generate(NOW), sample=True)
+        spans = sample.generate(NOW)
+        await SpanStore(pool).insert_spans(spans, sample=True)
+        await SpanStore(pool).insert_eval_runs(sample.eval_runs(NOW, spans), sample=True)
         # Keep the sample at NOW: without this the app's startup would shift it to the
         # current time (D11), and the snapshot would change on every run.
         await pool.execute("INSERT INTO lucentpad_meta (key, value) VALUES ('real_data_at', 'x')")
     finally:
         await pool.close()
+    monkeypatch.delenv("LUCENTPAD_RULES_FILE", raising=False)  # snapshot the built-in rules
     async with app_client(create_app(db_url, seed_sample=False)) as client:
         snapshot, parity = await _build(client)
 

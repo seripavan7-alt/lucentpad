@@ -4,21 +4,19 @@ import { describe, expect, it } from "vitest";
 import { traceListPage1 } from "../test/fixtures";
 import { getLocation, mockFetch, renderApp } from "../test/render";
 
-describe("Shell and placeholder pages", () => {
+describe("Shell", () => {
   it.each([
-    ["/costs", "Costs", "Arrives in M3"],
-    ["/guardrails", "Guardrails", "Arrives in M3"],
-    ["/evals", "Evals", "Arrives in M3"],
-  ])("%s renders its placeholder", (route, title, badge) => {
+    ["/costs", "Costs"],
+    ["/guardrails", "Guardrails"],
+    ["/evals", "Evals"],
+  ])("%s renders its page with a plain nav item (no milestone tag)", (route, title) => {
     mockFetch({});
     renderApp(route);
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
-    expect(screen.getByText(badge)).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getByRole("link", { name: new RegExp(title) })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    const link = within(nav).getByRole("link", { name: new RegExp(title) });
+    expect(link).toHaveAttribute("aria-current", "page");
+    expect(link).toHaveTextContent(new RegExp(`^${title}$`));
   });
 
   it("redirects / to /traces", async () => {

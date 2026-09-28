@@ -2,9 +2,11 @@
 
 ``QueuedIngest`` is the app's ``IngestPipeline``: the route offers batches to the queue and
 returns at once; one writer task takes up to ``batch_max`` spans or whatever arrived within
-``batch_wait`` seconds and stores them in one insert. A failed insert is retried with
-exponential backoff, then the batch is counted in ``write_errors_total`` and dropped. The
-task never dies on an error. ``stop`` refuses new spans and drains the queue within a timeout.
+``batch_wait`` seconds, passes them through ``transform`` (the app redacts there, D20; it runs
+in a worker thread so the event loop keeps serving) and stores them in one insert. A failed
+insert is retried with exponential backoff, then the batch is counted in
+``write_errors_total`` and dropped. The task never dies on an error. ``stop`` refuses new spans
+and drains the queue within a timeout.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from lucentpad_server.ingest.queue import SpanQueue
 from lucentpad_server.schema import IngestStats, Span
@@ -43,6 +45,7 @@ class QueuedIngest:
         retries: int = 4,
         backoff: float = 0.2,
         backoff_max: float = 2.0,
+        transform: Callable[[list[Span]], list[Span]] | None = None,
     ) -> None:
         self._store = store
         self._queue = queue
@@ -51,6 +54,7 @@ class QueuedIngest:
         self._retries = retries
         self._backoff = backoff
         self._backoff_max = backoff_max
+        self._transform = transform
         self._task: asyncio.Task[None] | None = None
         self._closing = False
         self._in_flight = 0
@@ -108,6 +112,8 @@ class QueuedIngest:
                 batch = await self._queue.drain(self._batch_max, self._batch_wait)
                 if batch:
                     self._in_flight = len(batch)
+                    if self._transform is not None:
+                        batch = await asyncio.to_thread(self._transform, batch)
                     await self._write(batch)
             except asyncio.CancelledError:
                 raise

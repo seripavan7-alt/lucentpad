@@ -9,8 +9,25 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from ._attrs import Attr
-from ._core import SpanRecord, active, note_llm_previews, start_span
+from ._core import (
+    SpanRecord,
+    account_spend,
+    active,
+    budget_runs,
+    budget_stop,
+    current_prices,
+    current_rules,
+    current_rules_async,
+    current_span,
+    note_llm_previews,
+    record_block,
+    start_span,
+)
+from ._errors import GuardrailBlocked
 from ._previews import PreviewBuilder
+from ._pricing import cost_usd
+from ._remote import RuleSet
+from .guardrails import check_prompt
 
 log = logging.getLogger("lucentpad")
 
@@ -43,6 +60,7 @@ class LLMCall:
         self.cache_read_tokens: int | None = None
         self.cache_creation_tokens: int | None = None
         self.finish_reasons: list[str] = []
+        self.request_model = request_model
         self._done = False
         self._lock = threading.Lock()
         model = request_model or "unknown"
@@ -80,14 +98,84 @@ class LLMCall:
             if self.finish_reasons:
                 a[Attr.GEN_AI_FINISH_REASONS] = list(self.finish_reasons)
             if self.capture and not self.output.empty:
-                a[Attr.OUTPUT_PREVIEW] = self.output.text()
-                a[Attr.OUTPUT_TRUNCATED] = self.output.truncated
+                self.rec.set_preview("output", self.output.text(), overflow=self.output.truncated)
             if exc is not None:
                 self.rec.set_error(exc)
+            self._account_budget()
+            self.rec.finalize()  # redact before the root copies the previews
             note_llm_previews(self.rec)
             self.rec.end()
         except Exception:
             log.debug("lucentpad: llm span end failed", exc_info=True)
+            self.rec.end()
+
+    def _account_budget(self) -> None:
+        """Estimate this call's cost from the price table and add it to the run's budget."""
+        try:
+            if not budget_runs(self.rec.parent):
+                return
+            prices = current_prices()
+            if prices is None or (self.input_tokens is None and self.output_tokens is None):
+                return
+            cost = None
+            for model in (self.response_model, self.request_model):
+                if model:
+                    cost = cost_usd(
+                        prices,
+                        model,
+                        int(self.input_tokens or 0),
+                        int(self.output_tokens or 0),
+                        int(self.cache_read_tokens or 0),
+                        int(self.cache_creation_tokens or 0),
+                    )
+                    if cost is not None:
+                        break
+            if cost is not None:
+                account_spend(self.rec, cost)
+        except Exception:
+            log.debug("lucentpad: budget estimate failed", exc_info=True)
+
+
+# --------------------------------------------------------------------------- before each call
+
+
+def _check(prompt: Callable[[], str | None], rules: RuleSet | None) -> Exception | None:
+    """Budget stop, then prompt rules on the last user message. Returns the exception to raise
+    (``BudgetExceeded`` / ``GuardrailBlocked``); never raises itself."""
+    try:
+        stop = budget_stop(current_span())
+        if stop is not None:
+            return stop
+        if rules is None:
+            rules = current_rules()
+        if not rules.prompt:
+            return None
+        text = prompt()
+        if not text:
+            return None
+        block = check_prompt(rules.prompt, text)
+        if block is None:
+            return None
+        record_block(block, {}, input_preview=text)
+        return GuardrailBlocked(block.rule, block.reason)
+    except Exception:
+        log.debug("lucentpad: guardrail check failed", exc_info=True)
+        return None
+
+
+def preflight(prompt: Callable[[], str | None], *, wait: bool = True) -> None:
+    """Run before a wrapped model call is sent; raises ``GuardrailBlocked``/``BudgetExceeded``.
+    ``wait=False``: never wait for the first rules fetch (sync code on an event loop)."""
+    exc = _check(prompt, None if wait else current_rules(wait=False))
+    if exc is not None:
+        raise exc
+
+
+async def apreflight(prompt: Callable[[], str | None]) -> None:
+    """Async ``preflight``: the one-time wait for the first rules fetch doesn't block the loop."""
+    exc = _check(prompt, await current_rules_async())
+    if exc is not None:
+        raise exc
 
 
 def instrument_stream(stream: Any, call: LLMCall, observe: Callable[[Any], bool]) -> None:
